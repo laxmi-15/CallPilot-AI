@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local submission files
+SUBMISSION.md
+database-schema.puml
+/docs/
