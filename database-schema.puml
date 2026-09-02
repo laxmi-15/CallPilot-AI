@@ -1,0 +1,215 @@
+@startuml CallPilot_AI_Database_Schema
+
+!theme plain
+skinparam linetype ortho
+skinparam roundcorner 10
+skinparam monochrome false
+skinparam shadowing false
+skinparam classFontSize 12
+skinparam classFontName "Helvetica"
+
+' ==============================================================================
+' CallPilot AI — PostgreSQL Relational Schema & Entity-Relationship Model
+' Verified against supabase/migrations/001_initial_schema.sql
+' ==============================================================================
+
+entity "businesses" as businesses {
+  * id : UUID [PK]
+  --
+  * name : TEXT
+  * type : TEXT (CHECK IN ('cake_shop', 'clinic', 'delivery', 'real_estate', 'repair_service', 'custom'))
+  * phone : TEXT
+  email : TEXT
+  address : TEXT
+  * timezone : TEXT (DEFAULT 'Asia/Kolkata')
+  * language : TEXT (CHECK IN ('en', 'hi', 'hinglish', 'kn'))
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "workflows" as workflows {
+  * id : UUID [PK]
+  --
+  * business_id : UUID [FK -> businesses.id]
+  * name : TEXT
+  description : TEXT
+  * industry : TEXT
+  * trigger : TEXT (DEFAULT 'missed_call')
+  * is_active : BOOLEAN (DEFAULT TRUE)
+  * greeting : TEXT
+  greeting_hi : TEXT
+  greeting_kn : TEXT
+  * personality : TEXT (DEFAULT 'warm_friendly')
+  * language : TEXT (DEFAULT 'en')
+  * closing_message : TEXT
+  closing_message_hi : TEXT
+  closing_message_kn : TEXT
+  * owner_notification : JSONB
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "workflow_fields" as workflow_fields {
+  * id : UUID [PK]
+  --
+  * workflow_id : UUID [FK -> workflows.id]
+  * name : TEXT
+  * label : TEXT
+  * type : TEXT (CHECK IN ('text', 'number', 'date', 'time', 'phone', 'email', 'select', 'address', 'boolean'))
+  * required : BOOLEAN (DEFAULT FALSE)
+  * question : TEXT
+  question_hi : TEXT
+  question_kn : TEXT
+  options : JSONB
+  validation_rule : TEXT
+  default_value : TEXT
+  * order_index : INTEGER (DEFAULT 0)
+  * created_at : TIMESTAMPTZ
+}
+
+entity "workflow_conditions" as workflow_conditions {
+  * id : UUID [PK]
+  --
+  * workflow_id : UUID [FK -> workflows.id]
+  field_id : UUID [FK -> workflow_fields.id]
+  * operator : TEXT (CHECK IN ('equals', 'not_equals', 'contains', 'greater_than', 'less_than', 'less_than_or_equal', 'within_hours', 'is_set', 'is_not_set'))
+  * value : TEXT
+  then_urgency : TEXT (CHECK IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL'))
+  then_action : TEXT
+  else_urgency : TEXT (CHECK IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL'))
+  else_action : TEXT
+  description : TEXT
+  * created_at : TIMESTAMPTZ
+}
+
+entity "workflow_actions" as workflow_actions {
+  * id : UUID [PK]
+  --
+  * workflow_id : UUID [FK -> workflows.id]
+  * type : TEXT (CHECK IN ('create_customer', 'create_task', 'create_calendar_event', 'update_calendar_event', 'cancel_calendar_event', 'send_notification', 'mark_urgent', 'generate_summary'))
+  * name : TEXT
+  description : TEXT
+  * config : JSONB (DEFAULT '{}')
+  * enabled : BOOLEAN (DEFAULT TRUE)
+  * created_at : TIMESTAMPTZ
+}
+
+entity "customers" as customers {
+  * id : UUID [PK]
+  --
+  * business_id : UUID [FK -> businesses.id]
+  * name : TEXT
+  * phone : TEXT
+  email : TEXT
+  address : TEXT
+  notes : TEXT
+  * latest_urgency : TEXT (CHECK IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL'))
+  * last_interaction_at : TIMESTAMPTZ
+  * total_conversations : INTEGER (DEFAULT 1)
+  * extracted_attributes : JSONB (DEFAULT '{}')
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity "conversations" as conversations {
+  * id : UUID [PK]
+  --
+  * business_id : UUID [FK -> businesses.id]
+  workflow_id : UUID [FK -> workflows.id]
+  customer_id : UUID [FK -> customers.id]
+  caller_name : TEXT
+  * caller_number : TEXT
+  * status : TEXT (CHECK IN ('new', 'contacted', 'completed', 'closed'))
+  * urgency : TEXT (CHECK IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL'))
+  * intent : TEXT (DEFAULT 'general_inquiry')
+  * summary : TEXT
+  * extracted_fields : JSONB (DEFAULT '{}')
+  * language : TEXT (CHECK IN ('en', 'hi', 'hinglish', 'kn'))
+  recording_url : TEXT
+  * started_at : TIMESTAMPTZ
+  completed_at : TIMESTAMPTZ
+  * created_at : TIMESTAMPTZ
+}
+
+entity "messages" as messages {
+  * id : UUID [PK]
+  --
+  * conversation_id : UUID [FK -> conversations.id]
+  * role : TEXT (CHECK IN ('system', 'assistant', 'user', 'tool'))
+  * content : TEXT
+  audio_url : TEXT
+  * language : TEXT (DEFAULT 'en')
+  * created_at : TIMESTAMPTZ
+}
+
+entity "tool_calls" as tool_calls {
+  * id : UUID [PK]
+  --
+  conversation_id : UUID [FK -> conversations.id]
+  * tool_name : TEXT
+  * input : JSONB (DEFAULT '{}')
+  * output : JSONB (DEFAULT '{}')
+  * status : TEXT (CHECK IN ('success', 'error', 'pending'))
+  error_message : TEXT
+  * execution_time_ms : INTEGER (DEFAULT 0)
+  * created_at : TIMESTAMPTZ
+}
+
+entity "calendar_events" as calendar_events {
+  * id : UUID [PK]
+  --
+  * business_id : UUID [FK -> businesses.id]
+  conversation_id : UUID [FK -> conversations.id]
+  google_event_id : TEXT
+  * title : TEXT
+  description : TEXT
+  * attendee_name : TEXT
+  attendee_phone : TEXT
+  attendee_email : TEXT
+  * start_time : TIMESTAMPTZ
+  * end_time : TIMESTAMPTZ
+  * status : TEXT (CHECK IN ('confirmed', 'tentative', 'cancelled'))
+  * created_at : TIMESTAMPTZ
+}
+
+entity "tasks" as tasks {
+  * id : UUID [PK]
+  --
+  * business_id : UUID [FK -> businesses.id]
+  conversation_id : UUID [FK -> conversations.id]
+  customer_id : UUID [FK -> customers.id]
+  * title : TEXT
+  description : TEXT
+  * urgency : TEXT (CHECK IN ('LOW', 'NORMAL', 'HIGH', 'CRITICAL'))
+  * status : TEXT (CHECK IN ('pending', 'in_progress', 'completed', 'cancelled'))
+  assigned_to : TEXT
+  due_date : TIMESTAMPTZ
+  * created_at : TIMESTAMPTZ
+}
+
+' ==============================================================================
+' Relationships (Industry-Standard Crow's Foot Notation)
+' ==============================================================================
+
+businesses ||--o{ workflows : "1:N (configures)"
+businesses ||--o{ customers : "1:N (manages)"
+businesses ||--o{ conversations : "1:N (logs)"
+businesses ||--o{ calendar_events : "1:N (schedules)"
+businesses ||--o{ tasks : "1:N (assigns)"
+
+workflows ||--|{ workflow_fields : "1:N (defines intake)"
+workflows ||--o{ workflow_conditions : "1:N (evaluates rules)"
+workflows ||--o{ workflow_actions : "1:N (executes hooks)"
+workflows ||--o{ conversations : "1:N (drives sessions)"
+
+workflow_fields ||--o{ workflow_conditions : "0..1:N (evaluated by)"
+
+customers ||--o{ conversations : "1:N (initiates)"
+customers ||--o{ tasks : "1:N (associated with)"
+
+conversations ||--|{ messages : "1:N (contains transcript)"
+conversations ||--o{ tool_calls : "1:N (executes telemetry)"
+conversations ||--o{ calendar_events : "0..1:N (creates bookings)"
+conversations ||--o{ tasks : "0..1:N (generates follow-ups)"
+
+@enduml
