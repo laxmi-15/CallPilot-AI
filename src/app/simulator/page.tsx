@@ -669,11 +669,11 @@ export default function SimulatorPage() {
   const totalCount = activeWorkflow.fields.length;
 
   return (
-    <div className="space-y-6 pb-16">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-5 space-y-4 sm:space-y-6 pb-16">
       {/* =========================================================================
           TOP COMMAND BAR & MULTILINGUAL VOICE STATUS
       ========================================================================== */}
-      <div className="glass-panel-luxury rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border border-slate-200/90 shadow-lg">
+      <div className="glass-panel-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4 border border-slate-200/90 shadow-md">
         {/* Industry Selector */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
@@ -696,7 +696,7 @@ export default function SimulatorPage() {
                 <button
                   key={item.id}
                   onClick={() => setSelectedIndustry(item.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-200 cursor-pointer ${
                     isActive
                       ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/25 scale-[1.02] ring-2 ring-indigo-400/40"
                       : "bg-white/80 hover:bg-slate-100 text-slate-700 border border-slate-200/90 hover:border-slate-300"
@@ -710,12 +710,12 @@ export default function SimulatorPage() {
         </div>
 
         {/* Right Action Controls: Language Toggle, Mode Toggle, Reset & CRM Sync */}
-        <div className="flex items-center flex-wrap gap-2.5">
+        <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
           {/* Multilingual Selector: English, Hindi, Kannada */}
-          <div className="flex items-center rounded-2xl bg-slate-100/90 p-1 border border-slate-200/80 shadow-inner text-xs">
+          <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
             <button
               onClick={() => setSelectedLanguage("en")}
-              className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer ${
                 selectedLanguage === "en"
                   ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
@@ -726,7 +726,7 @@ export default function SimulatorPage() {
             </button>
             <button
               onClick={() => setSelectedLanguage("hi")}
-              className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer ${
                 selectedLanguage === "hi" || selectedLanguage === "hinglish"
                   ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
@@ -737,7 +737,7 @@ export default function SimulatorPage() {
             </button>
             <button
               onClick={() => setSelectedLanguage("kn")}
-              className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer ${
                 selectedLanguage === "kn"
                   ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
@@ -749,29 +749,29 @@ export default function SimulatorPage() {
           </div>
 
           {/* Voice Mode Selector: Dictate & Edit (ChatGPT Style) vs Live Phone Call */}
-          <div className="flex items-center rounded-2xl bg-slate-100/90 p-1 border border-slate-200/80 shadow-inner text-xs">
+          <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
             <button
               onClick={() => setVoiceModeType("dictate")}
-              className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
                 voiceModeType === "dictate"
                   ? "bg-indigo-600 text-white shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
               }`}
               title="Speak -> Transcribe into text box -> Edit -> Send"
             >
-              <Edit3 className="h-3.5 w-3.5" />
+              <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
               <span>Dictate & Edit</span>
             </button>
             <button
               onClick={() => setVoiceModeType("live_call")}
-              className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
                 voiceModeType === "live_call"
                   ? "bg-indigo-600 text-white shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
               }`}
               title="Hands-free continuous phone call simulation"
             >
-              <PhoneCall className="h-3.5 w-3.5" />
+              <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
               <span>Live Call</span>
             </button>
           </div>
@@ -779,7 +779,7 @@ export default function SimulatorPage() {
           {/* Audio TTS Output Toggle */}
           <button
             onClick={() => setAudioEnabled(!audioEnabled)}
-            className={`p-2 rounded-2xl border transition-all cursor-pointer ${
+            className={`p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border transition-all cursor-pointer ${
               audioEnabled
                 ? "bg-indigo-50 border-indigo-200 text-indigo-700"
                 : "bg-slate-100 border-slate-200 text-slate-400"
@@ -795,7 +795,7 @@ export default function SimulatorPage() {
             variant="secondary"
             onClick={handleReset}
             leftIcon={<RotateCcw className="h-3.5 w-3.5 text-slate-500" />}
-            className="rounded-2xl"
+            className="rounded-xl sm:rounded-2xl text-xs"
           >
             Reset
           </Button>
@@ -806,7 +806,7 @@ export default function SimulatorPage() {
             variant="glow"
             onClick={handleSaveToDashboard}
             leftIcon={<Save className="h-3.5 w-3.5" />}
-            className="rounded-2xl shadow-md"
+            className="rounded-xl sm:rounded-2xl shadow-md text-xs"
           >
             {savedSuccess ? "✓ Logged to CRM!" : "Save"}
           </Button>
@@ -834,16 +834,16 @@ export default function SimulatorPage() {
       )}
 
       {/* =========================================================================
-          3-COLUMN HIGH-PERFORMANCE COCKPIT GRID
+          3-COLUMN RESPONSIVE COCKPIT GRID (Optimized for Laptop & Mobile 100% Zoom)
       ========================================================================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-start">
         {/* =========================================================================
-            COLUMN 1: BUSINESS CONTEXT, PROGRESS & TEST SCENARIOS (3 Cols)
+            COLUMN 1: BUSINESS CONTEXT, PROGRESS & TEST SCENARIOS (3 Cols on XL, 4 on LG)
         ========================================================================== */}
-        <div className="lg:col-span-3 space-y-4">
+        <div className="lg:col-span-4 xl:col-span-3 space-y-3.5 sm:space-y-4">
           {/* Active Business Profile Card */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-2.5 sm:space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div className="flex items-center gap-1.5">
                 <Building2 className="h-3.5 w-3.5 text-indigo-600" />
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
@@ -855,10 +855,10 @@ export default function SimulatorPage() {
               </Badge>
             </div>
 
-            <div className="text-xs space-y-2 text-slate-700">
+            <div className="text-xs space-y-1.5 sm:space-y-2 text-slate-700">
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Company:</span>
-                <span className="font-bold text-slate-900">{storageRepo.getActiveBusiness().name}</span>
+                <span className="font-bold text-slate-900 truncate max-w-[130px]">{storageRepo.getActiveBusiness().name}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Language:</span>
@@ -868,19 +868,19 @@ export default function SimulatorPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Voice Mode:</span>
-                <span className="font-bold text-slate-800 text-[11px]">
+                <span className="font-bold text-slate-800 text-[11px] truncate max-w-[130px]">
                   {voiceModeType === "dictate" ? "ChatGPT Dictate & Edit" : "Continuous Live Call"}
                 </span>
               </div>
-              <div className="text-[11px] text-slate-600 bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/70 leading-relaxed font-normal">
+              <div className="text-[11px] text-slate-600 bg-slate-50/80 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl border border-slate-200/70 leading-relaxed font-normal">
                 {activeWorkflow.description}
               </div>
             </div>
           </div>
 
           {/* Intake Completion & Fields Checklist Card */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3.5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div>
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
                   Fields Checklist
@@ -899,7 +899,7 @@ export default function SimulatorPage() {
             <ProgressBar value={capturedCount} max={totalCount} />
 
             {/* Checklist items */}
-            <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-[220px] sm:max-h-[260px] overflow-y-auto pr-1">
               {activeWorkflow.fields.map((field) => {
                 const capturedValue = extractedFields[field.name];
                 const isCollected = capturedValue !== undefined && capturedValue !== "" && capturedValue !== null;
@@ -908,7 +908,7 @@ export default function SimulatorPage() {
                 return (
                   <div
                     key={field.id}
-                    className={`flex flex-col p-2 rounded-2xl text-xs transition-all duration-300 border ${
+                    className={`flex flex-col p-2 rounded-xl sm:rounded-2xl text-xs transition-all duration-300 border ${
                       isCollected
                         ? "bg-emerald-50/90 border-emerald-200 text-emerald-950 shadow-2xs font-semibold"
                         : "bg-slate-50/70 border-slate-200/80 text-slate-500 font-normal"
@@ -917,11 +917,11 @@ export default function SimulatorPage() {
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-2 truncate">
                         {isCollected ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                          <CheckCircle2 className="h-3.5 sm:h-4 w-3.5 sm:w-4 text-emerald-600 shrink-0" />
                         ) : (
-                          <div className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 shrink-0" />
+                          <div className="h-3 w-3 sm:h-3.5 sm:w-3.5 rounded-full border-2 border-slate-300 shrink-0" />
                         )}
-                        <span className="truncate">{field.label}</span>
+                        <span className="truncate text-[11px] sm:text-xs">{field.label}</span>
                       </div>
                       {field.required && !isCollected && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 font-bold shrink-0">
@@ -931,7 +931,7 @@ export default function SimulatorPage() {
                     </div>
 
                     {isCollected && (
-                      <div className="mt-1 pl-6 text-[11px] font-mono text-emerald-800 font-bold truncate">
+                      <div className="mt-1 pl-5 sm:pl-6 text-[10px] sm:text-[11px] font-mono text-emerald-800 font-bold truncate">
                         ↳ &ldquo;{String(capturedValue)}&rdquo;
                       </div>
                     )}
@@ -942,7 +942,7 @@ export default function SimulatorPage() {
           </div>
 
           {/* 1-Click Realistic Test Scenarios */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3">
+          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-2.5 sm:space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
                 <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
@@ -951,15 +951,15 @@ export default function SimulatorPage() {
               <span className="text-[10px] text-slate-400">Simulate caller</span>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
               {(quickPrompts[selectedIndustry] || quickPrompts.cake_shop).map((item, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleSendMessage(item.text)}
                   disabled={isLoading}
-                  className="w-full text-left p-2.5 rounded-2xl bg-slate-50/80 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 text-xs text-slate-800 font-medium transition-all duration-200 cursor-pointer group shadow-2xs hover:scale-[1.01]"
+                  className="w-full text-left p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-slate-50/80 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 text-xs text-slate-800 font-medium transition-all duration-200 cursor-pointer group shadow-2xs hover:scale-[1.01]"
                 >
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-0.5 sm:mb-1">
                     <span className="font-bold text-slate-900 group-hover:text-indigo-700 text-xs truncate">
                       {item.label}
                     </span>
@@ -967,7 +967,7 @@ export default function SimulatorPage() {
                       {item.tag}
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-500 line-clamp-1 italic font-normal">
+                  <div className="text-[10px] sm:text-[11px] text-slate-500 line-clamp-1 italic font-normal">
                     &ldquo;{item.text}&rdquo;
                   </div>
                 </button>
@@ -977,16 +977,16 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 2: LIVE VOICE STREAM & CHATGPT-STYLE INPUT (6 Cols)
+            COLUMN 2: LIVE VOICE STREAM & CHATGPT-STYLE INPUT (6 Cols on XL, 8 on LG)
         ========================================================================== */}
-        <div className="lg:col-span-6 space-y-4">
-          <div className="glass-card-luxury rounded-3xl flex flex-col h-[720px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
+        <div className="lg:col-span-8 xl:col-span-6 space-y-3.5 sm:space-y-4">
+          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl flex flex-col h-[520px] sm:h-[580px] lg:h-[620px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
             {/* High-End Voice Call Header */}
-            <div className="p-4 border-b border-slate-100/90 flex items-center justify-between bg-gradient-to-r from-slate-50/90 via-indigo-50/30 to-purple-50/30">
-              <div className="flex items-center gap-3">
+            <div className="p-3 sm:p-4 border-b border-slate-100/90 flex items-center justify-between bg-gradient-to-r from-slate-50/90 via-indigo-50/30 to-purple-50/30">
+              <div className="flex items-center gap-2.5 sm:gap-3">
                 {/* Caller Avatar with Live Pulse Rings */}
-                <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30">
-                  <PhoneCall className="h-5 w-5" />
+                <div className="relative flex h-8 sm:h-10 w-8 sm:w-10 items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30 shrink-0">
+                  <PhoneCall className="h-4 sm:h-5 w-4 sm:w-5" />
                   {voiceState === "speaking" && (
                     <>
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-2xl bg-indigo-400 opacity-60" />
@@ -999,8 +999,8 @@ export default function SimulatorPage() {
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 truncate max-w-[160px] sm:max-w-none">
                       Live Missed-Call Voice Assistant
                     </h3>
                     <Badge
@@ -1016,21 +1016,21 @@ export default function SimulatorPage() {
                           : "neon-indigo"
                       }
                       dot={!isCallEnded}
-                      className="text-[10px] py-0.5"
+                      className="text-[9px] sm:text-[10px] py-0.5 px-1.5"
                     >
                       {isCallEnded
-                        ? "✓ Call Ended"
+                        ? "✓ Ended"
                         : voiceState === "speaking"
                         ? "🔊 Speaking"
                         : isRecording
-                        ? "🎙️ Recording Voice"
+                        ? "🎙️ Recording"
                         : isTranscribing
-                        ? "⚡ Transcribing..."
-                        : "Active Call"}
+                        ? "⚡ Transcribing"
+                        : "Active"}
                     </Badge>
                   </div>
-                  <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                    <span>Caller: +1 (555) 349-8800</span>
+                  <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1 sm:gap-1.5 mt-0.5">
+                    <span>+1 (555) 349-8800</span>
                     <span>•</span>
                     <span className="font-mono text-slate-600 font-bold">{formatCallDuration(callDuration)}</span>
                   </p>
@@ -1038,28 +1038,28 @@ export default function SimulatorPage() {
               </div>
 
               {/* Soundwave Audio Equalizer / Voice Control */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 {voiceState === "speaking" && (
                   <button
                     onClick={handleInterruptSpeaking}
-                    className="px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold hover:bg-rose-100 flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                    className="px-2 sm:px-2.5 py-1 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold hover:bg-rose-100 flex items-center gap-1 transition-all cursor-pointer shadow-2xs shrink-0"
                     title="Interrupt assistant audio"
                   >
                     <Square className="h-3 w-3" />
-                    <span>Interrupt</span>
+                    <span className="hidden sm:inline">Interrupt</span>
                   </button>
                 )}
 
                 {audioEnabled && (
-                  <div className="flex items-center gap-1 h-8 px-3 rounded-2xl bg-white/90 border border-indigo-200/80 shadow-2xs">
-                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-1" : liveVolume > 10 ? "h-4" : "h-1.5"}`} />
-                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-2" : liveVolume > 20 ? "h-6" : "h-2.5"}`} />
-                    <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-3" : liveVolume > 30 ? "h-7" : "h-3.5"}`} />
-                    <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-4" : liveVolume > 20 ? "h-5" : "h-2"}`} />
-                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-5" : liveVolume > 15 ? "h-6" : "h-3"}`} />
-                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-6" : liveVolume > 5 ? "h-3" : "h-1.5"}`} />
-                    <span className="ml-1.5 text-[10px] font-extrabold text-indigo-700 tracking-wide uppercase">
-                      {voiceState === "speaking" ? "Speaking" : isRecording ? "Listening" : "Voice On"}
+                  <div className="flex items-center gap-1 h-7 sm:h-8 px-2 sm:px-3 rounded-xl sm:rounded-2xl bg-white/90 border border-indigo-200/80 shadow-2xs">
+                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-1" : liveVolume > 10 ? "h-3 sm:h-4" : "h-1.5"}`} />
+                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-2" : liveVolume > 20 ? "h-4 sm:h-6" : "h-2"}`} />
+                    <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-3" : liveVolume > 30 ? "h-5 sm:h-7" : "h-2.5"}`} />
+                    <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-4" : liveVolume > 20 ? "h-4 sm:h-5" : "h-2"}`} />
+                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-5" : liveVolume > 15 ? "h-4 sm:h-6" : "h-2"}`} />
+                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-6" : liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
+                    <span className="ml-1 text-[9px] sm:text-[10px] font-extrabold text-indigo-700 tracking-wide uppercase hidden sm:inline">
+                      {voiceState === "speaking" ? "Speaking" : isRecording ? "Listening" : "Voice"}
                     </span>
                   </div>
                 )}
@@ -1067,7 +1067,7 @@ export default function SimulatorPage() {
             </div>
 
             {/* Conversation Stream Message List */}
-            <div className="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4 bg-slate-50/40">
+            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-3 sm:space-y-4 bg-slate-50/40 min-h-0">
               {messages.map((msg) => {
                 const isAssistant = msg.role === "assistant";
                 return (
@@ -1091,7 +1091,7 @@ export default function SimulatorPage() {
                     </div>
 
                     <div
-                      className={`max-w-[88%] sm:max-w-[82%] rounded-3xl px-4 sm:px-5 py-3 text-xs sm:text-sm leading-relaxed shadow-sm transition-all ${
+                      className={`max-w-[90%] sm:max-w-[82%] rounded-2xl sm:rounded-3xl px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-sm transition-all ${
                         isAssistant
                           ? "bg-white border border-indigo-100/90 text-slate-800 font-normal rounded-tl-sm"
                           : "bg-gradient-to-r from-indigo-600 via-indigo-600 to-purple-600 text-white font-medium rounded-tr-sm shadow-indigo-600/20"
@@ -1102,13 +1102,13 @@ export default function SimulatorPage() {
 
                     {/* Tool Call Inline Badge if assistant executed tools */}
                     {isAssistant && msg.toolCalls && msg.toolCalls.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5 pl-1">
+                      <div className="mt-1.5 flex flex-wrap gap-1.5 pl-1">
                         {msg.toolCalls.map((t, idx) => (
                           <div
                             key={idx}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-mono font-bold shadow-2xs"
+                            className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg sm:rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[10px] sm:text-[11px] font-mono font-bold shadow-2xs"
                           >
-                            <CalendarCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            <CalendarCheck className="h-3 sm:h-3.5 w-3 sm:w-3.5 text-emerald-600 shrink-0" />
                             <span>{t.toolName}</span>
                             <span className="text-[9px] text-emerald-600 bg-emerald-100 px-1 py-0.5 rounded font-bold">
                               {t.executionTimeMs || 45}ms
@@ -1128,13 +1128,13 @@ export default function SimulatorPage() {
                     <Bot className="h-3 w-3 text-indigo-600" />
                     <span>CallPilot AI</span>
                   </div>
-                  <div className="rounded-3xl rounded-tl-sm bg-white border border-indigo-100 px-4 py-3 shadow-sm">
+                  <div className="rounded-2xl sm:rounded-3xl rounded-tl-sm bg-white border border-indigo-100 px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-sm">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-2 rounded-full bg-indigo-600 animate-bounce" />
                       <div className="h-2 w-2 rounded-full bg-purple-600 animate-bounce [animation-delay:0.2s]" />
                       <div className="h-2 w-2 rounded-full bg-pink-500 animate-bounce [animation-delay:0.4s]" />
                       <span className="text-xs font-semibold text-slate-600 ml-1">
-                        Extracting entities & checking Google Calendar availability...
+                        Checking availability & extracting entities...
                       </span>
                     </div>
                   </div>
@@ -1144,17 +1144,17 @@ export default function SimulatorPage() {
             </div>
 
             {/* Smart Contextual Suggestion Chips */}
-            <div className="px-4 py-2 border-t border-slate-100 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+            <div className="px-3 sm:px-4 py-2 border-t border-slate-100 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
                 <Sparkles className="h-3 w-3 text-indigo-500" />
-                <span>Quick Answers:</span>
+                <span>Quick:</span>
               </span>
               {getContextualChips().map((chip, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleSendMessage(chip)}
                   disabled={isLoading}
-                  className="shrink-0 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 text-xs font-semibold transition-colors cursor-pointer"
+                  className="shrink-0 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg sm:rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer"
                 >
                   {chip}
                 </button>
@@ -1164,14 +1164,14 @@ export default function SimulatorPage() {
             {/* =========================================================================
                 CHATGPT-STYLE VOICE DICTATION & EDIT BAR
             ========================================================================== */}
-            <div className="p-3.5 border-t border-slate-200/80 bg-white/90">
+            <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/90">
               {isRecording ? (
                 /* Active Recording State (Waveform + Done / Cancel) */
-                <div className="flex items-center justify-between gap-3 p-2.5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xl animate-in fade-in duration-200">
-                  <div className="flex items-center gap-2.5 pl-2">
-                    <span className="relative flex h-3 w-3">
+                <div className="flex items-center justify-between gap-2.5 sm:gap-3 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xl animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 pl-1.5">
+                    <span className="relative flex h-2.5 w-2.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
                     </span>
                     <span className="font-mono text-xs font-bold text-rose-300">
                       {formatCallDuration(recordingSeconds)}
@@ -1179,47 +1179,47 @@ export default function SimulatorPage() {
                   </div>
 
                   {/* Dynamic Soundwave Visualizer Bars */}
-                  <div className="flex items-center gap-1 h-6">
-                    <div className={`w-1 bg-rose-400 rounded-full transition-all duration-75 ${liveVolume > 10 ? "h-5" : "h-1.5"}`} />
-                    <div className={`w-1 bg-indigo-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-6" : "h-2.5"}`} />
-                    <div className={`w-1 bg-purple-300 rounded-full transition-all duration-75 ${liveVolume > 30 ? "h-7" : "h-3.5"}`} />
-                    <div className={`w-1 bg-rose-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5" : "h-2"}`} />
-                    <div className={`w-1 bg-indigo-400 rounded-full transition-all duration-75 ${liveVolume > 15 ? "h-6" : "h-3"}`} />
-                    <div className={`w-1 bg-purple-400 rounded-full transition-all duration-75 ${liveVolume > 5 ? "h-3" : "h-1.5"}`} />
+                  <div className="flex items-center gap-1 h-5 sm:h-6">
+                    <div className={`w-1 bg-rose-400 rounded-full transition-all duration-75 ${liveVolume > 10 ? "h-4 sm:h-5" : "h-1.5"}`} />
+                    <div className={`w-1 bg-indigo-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-6" : "h-2"}`} />
+                    <div className={`w-1 bg-purple-300 rounded-full transition-all duration-75 ${liveVolume > 30 ? "h-6 sm:h-7" : "h-2.5"}`} />
+                    <div className={`w-1 bg-rose-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-5" : "h-2"}`} />
+                    <div className={`w-1 bg-indigo-400 rounded-full transition-all duration-75 ${liveVolume > 15 ? "h-5 sm:h-6" : "h-2"}`} />
+                    <div className={`w-1 bg-purple-400 rounded-full transition-all duration-75 ${liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
                   </div>
 
-                  <span className="text-xs text-slate-300 font-medium hidden sm:inline">
+                  <span className="text-[11px] sm:text-xs text-slate-300 font-medium hidden md:inline">
                     Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}...
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     {/* Cancel Recording */}
                     <button
                       type="button"
                       onClick={cancelRecording}
-                      className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-all cursor-pointer"
+                      className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-all cursor-pointer"
                       title="Cancel recording"
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
                     </button>
 
                     {/* Done / Transcribe Button */}
                     <button
                       type="button"
                       onClick={stopAndTranscribe}
-                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
+                      className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1 sm:gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
                       title="Transcribe and edit message"
                     >
-                      <Check className="h-4 w-4" />
+                      <Check className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
                       <span>Done</span>
                     </button>
                   </div>
                 </div>
               ) : isTranscribing ? (
                 /* Transcribing Loader State */
-                <div className="flex items-center justify-center gap-2.5 p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold animate-pulse">
+                <div className="flex items-center justify-center gap-2 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold animate-pulse">
                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                  <span>Transcribing speech with Sarvam Saaras v3 ({selectedLanguage === "kn" ? "kn-IN" : selectedLanguage === "hi" ? "hi-IN" : "en-IN"})...</span>
+                  <span>Transcribing speech ({selectedLanguage === "kn" ? "kn-IN" : selectedLanguage === "hi" ? "hi-IN" : "en-IN"})...</span>
                 </div>
               ) : (
                 /* Standard ChatGPT Input Form with Dedicated Mic Button */
@@ -1235,7 +1235,7 @@ export default function SimulatorPage() {
                     type="button"
                     onClick={startRecording}
                     disabled={isLoading || voiceState === "speaking"}
-                    className="p-3 rounded-2xl bg-slate-100 hover:bg-indigo-50 border border-slate-300/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 transition-all cursor-pointer shrink-0 shadow-2xs group"
+                    className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-100 hover:bg-indigo-50 border border-slate-300/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 transition-all cursor-pointer shrink-0 shadow-2xs group"
                     title="Click to speak (ChatGPT Voice Dictation)"
                   >
                     <Mic className="h-4 w-4 text-indigo-600 group-hover:scale-110 transition-transform" />
@@ -1250,12 +1250,12 @@ export default function SimulatorPage() {
                           ? "ಕರೆ ಮಾಡುವವರು ಏನು ಹೇಳುತ್ತಾರೆಂದು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮೈಕ್ ಕ್ಲಿಕ್ ಮಾಡಿ..."
                           : selectedLanguage === "hi"
                           ? "कॉल करने वाले की बात लिखें या माइक से बोलें..."
-                          : "Type or click Mic to speak (e.g. 'Anusha', 'Dr. Sharma tomorrow 3 PM')..."
+                          : "Type or click Mic to speak (e.g. 'Anusha', 'September 4 12:34 AM')..."
                       }
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
                       disabled={isLoading}
-                      className="w-full rounded-2xl bg-slate-50/90 border border-slate-300/90 px-4 py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium"
+                      className="w-full rounded-xl sm:rounded-2xl bg-slate-50/90 border border-slate-300/90 px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">Enter ↵</span>
@@ -1267,7 +1267,7 @@ export default function SimulatorPage() {
                     size="md"
                     variant="glow"
                     disabled={isLoading || !inputText.trim()}
-                    className="rounded-2xl px-5 shadow-md shrink-0"
+                    className="rounded-xl sm:rounded-2xl px-4 sm:px-5 shadow-md shrink-0"
                   >
                     <Send className="h-4 w-4" />
                   </Button>
@@ -1278,149 +1278,151 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 3: LIVE TRIAGE, STRUCTURED ENTITIES & TOOL CONSOLE (3 Cols)
+            COLUMN 3: LIVE TRIAGE, STRUCTURED ENTITIES & TOOL CONSOLE (3 Cols on XL, 12 on LG)
         ========================================================================== */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Live Urgency & Triage Telemetry */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <div className="flex items-center gap-1.5">
-                <Activity className="h-3.5 w-3.5 text-indigo-600" />
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
-                  Live Triage
-                </span>
-              </div>
-              <Badge
-                variant={
-                  urgency === "CRITICAL"
-                    ? "neon-rose"
-                    : urgency === "HIGH"
-                    ? "neon-amber"
-                    : "neon-emerald"
-                }
-                dot
-                className="text-[11px]"
-              >
-                {urgency}
-              </Badge>
-            </div>
-
-            <div className="text-xs space-y-2.5 text-slate-700">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Detected Intent:</span>
-                <span className="font-bold text-slate-900 font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded-md">
-                  {currentIntent}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Workflow Complete:</span>
-                <span
-                  className={`font-bold flex items-center gap-1 ${
-                    isComplete ? "text-emerald-700" : "text-amber-700"
-                  }`}
+        <div className="lg:col-span-12 xl:col-span-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3.5 sm:gap-4">
+            {/* Live Urgency & Triage Telemetry */}
+            <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-2.5 sm:space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5 text-indigo-600" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
+                    Live Triage
+                  </span>
+                </div>
+                <Badge
+                  variant={
+                    urgency === "CRITICAL"
+                      ? "neon-rose"
+                      : urgency === "HIGH"
+                      ? "neon-amber"
+                      : "neon-emerald"
+                  }
+                  dot
+                  className="text-[10px] sm:text-[11px]"
                 >
-                  {isComplete ? (
-                    <>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>Ready to Confirm</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
-                      <span>Collecting ({capturedCount}/{totalCount})</span>
-                    </>
-                  )}
-                </span>
+                  {urgency}
+                </Badge>
               </div>
-            </div>
-          </div>
 
-          {/* Live Extracted Customer Data Table */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <div className="flex items-center gap-1.5">
-                <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
-                  Extracted Entities
-                </span>
-              </div>
-              <button
-                onClick={handleCopyJson}
-                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-              >
-                {copiedJson ? "✓ Copied!" : "Copy JSON"}
-              </button>
-            </div>
-
-            {Object.keys(extractedFields).length === 0 ? (
-              <div className="py-6 text-center text-xs text-slate-400 italic">
-                Entities will populate in real time as the caller speaks or types.
-              </div>
-            ) : (
-              <div className="space-y-1.5 max-h-[160px] overflow-y-auto">
-                {Object.entries(extractedFields).map(([key, val]) => (
-                  <div
-                    key={key}
-                    className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 border border-slate-200 text-xs"
+              <div className="text-xs space-y-2 text-slate-700">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Detected Intent:</span>
+                  <span className="font-bold text-slate-900 font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-[120px]">
+                    {currentIntent}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Workflow Complete:</span>
+                  <span
+                    className={`font-bold flex items-center gap-1 ${
+                      isComplete ? "text-emerald-700" : "text-amber-700"
+                    }`}
                   >
-                    <span className="font-mono text-slate-500 text-[11px] font-semibold">{key}:</span>
-                    <span className="font-bold text-slate-900 truncate max-w-[140px] text-right font-mono text-[11px]">
-                      {String(val)}
-                    </span>
-                  </div>
-                ))}
+                    {isComplete ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>Ready to Confirm</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
+                        <span>Collecting ({capturedCount}/{totalCount})</span>
+                      </>
+                    )}
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* Live Tool Execution & Telemetry Inspector */}
-          <div className="glass-card-luxury rounded-3xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <div className="flex items-center gap-1.5">
-                <CalendarCheck className="h-3.5 w-3.5 text-indigo-600" />
-                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
-                  Tool Telemetry
-                </span>
-              </div>
-              <Badge variant="secondary" className="text-[10px] font-mono">
-                {toolCalls.length} Executed
-              </Badge>
             </div>
 
-            {toolCalls.length === 0 ? (
-              <div className="py-4 text-center text-xs text-slate-400 italic">
-                Tools trigger automatically upon intent recognition.
+            {/* Live Extracted Customer Data Table */}
+            <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-2.5 sm:space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
+                    Extracted Entities
+                  </span>
+                </div>
+                <button
+                  onClick={handleCopyJson}
+                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedJson ? "✓ Copied!" : "Copy JSON"}
+                </button>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
-                {toolCalls.map((tc, idx) => (
-                  <div
-                    key={idx}
-                    className="p-2.5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-indigo-700 font-mono text-xs truncate">
-                        {tc.toolName}
-                      </span>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                          tc.status === "success"
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : "bg-rose-50 text-rose-700 border border-rose-200"
-                        }`}
-                      >
-                        {tc.status}
+
+              {Object.keys(extractedFields).length === 0 ? (
+                <div className="py-4 sm:py-6 text-center text-xs text-slate-400 italic">
+                  Entities will populate as caller speaks or types.
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-[140px] sm:max-h-[160px] overflow-y-auto">
+                  {Object.entries(extractedFields).map(([key, val]) => (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between p-1.5 sm:p-2 rounded-xl bg-slate-50/80 border border-slate-200 text-xs"
+                    >
+                      <span className="font-mono text-slate-500 text-[10px] sm:text-[11px] font-semibold truncate max-w-[100px]">{key}:</span>
+                      <span className="font-bold text-slate-900 truncate max-w-[130px] text-right font-mono text-[10px] sm:text-[11px]">
+                        {String(val)}
                       </span>
                     </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                    <div className="text-[10px] font-mono text-slate-500 bg-slate-50 p-1.5 rounded-lg overflow-x-auto">
-                      <div>In: {JSON.stringify(tc.input)}</div>
-                      <div className="text-emerald-700 mt-0.5">Out: {JSON.stringify(tc.output)}</div>
-                    </div>
-                  </div>
-                ))}
+            {/* Live Tool Execution & Telemetry Inspector */}
+            <div className="glass-card-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 space-y-2.5 sm:space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <CalendarCheck className="h-3.5 w-3.5 text-indigo-600" />
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
+                    Tool Telemetry
+                  </span>
+                </div>
+                <Badge variant="secondary" className="text-[10px] font-mono">
+                  {toolCalls.length} Executed
+                </Badge>
               </div>
-            )}
+
+              {toolCalls.length === 0 ? (
+                <div className="py-4 text-center text-xs text-slate-400 italic">
+                  Tools trigger automatically upon intent recognition.
+                </div>
+              ) : (
+                <div className="space-y-1.5 sm:space-y-2 max-h-[150px] sm:max-h-[180px] overflow-y-auto pr-1">
+                  {toolCalls.map((tc, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-700 font-mono text-xs truncate">
+                          {tc.toolName}
+                        </span>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                            tc.status === "success"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-rose-50 text-rose-700 border border-rose-200"
+                          }`}
+                        >
+                          {tc.status}
+                        </span>
+                      </div>
+
+                      <div className="text-[10px] font-mono text-slate-500 bg-slate-50 p-1.5 rounded-lg overflow-x-auto">
+                        <div>In: {JSON.stringify(tc.input)}</div>
+                        <div className="text-emerald-700 mt-0.5">Out: {JSON.stringify(tc.output)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

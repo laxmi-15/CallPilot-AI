@@ -171,6 +171,96 @@ export function parseCleanName(rawText: string): string | null {
   return null;
 }
 
+// Comprehensive Dynamic Date Parser across English, Hindi, and Kannada
+export function parseDynamicDate(text: string): string | null {
+  const lower = text.toLowerCase();
+
+  const monthsMap: Record<string, string> = {
+    january: "January", jan: "January", "जनवरी": "January", "ಜನವರಿ": "January",
+    february: "February", feb: "February", "फरवरी": "February", "ಫೆಬ್ರವರಿ": "February",
+    march: "March", mar: "March", "मार्च": "March", "ಮಾರ್ಚ್": "March",
+    april: "April", apr: "April", "अप्रैल": "April", "ಏಪ್ರಿಲ್": "April",
+    may: "May", "मई": "May", "ಮೇ": "May",
+    june: "June", jun: "June", "जून": "June", "ಜೂನ್": "June",
+    july: "July", jul: "July", "जुलाई": "July", "ಜುಲೈ": "July",
+    august: "August", aug: "August", "अगस्त": "August", "ಆಗಸ್ಟ್": "August",
+    september: "September", sept: "September", sep: "September", "सितंबर": "September", "सितम्बर": "September", "ಸೆಪ್ಟೆಂಬರ್": "September",
+    october: "October", oct: "October", "अक्टूबर": "October", "ಅಕ್ಟೋಬರ್": "October",
+    november: "November", nov: "November", "नवंबर": "November", "ನವೆಂಬರ್": "November",
+    december: "December", dec: "December", "दिसंबर": "December", "ಡಿಸೆಂಬರ್": "December",
+  };
+
+  const monthRegexPart = Object.keys(monthsMap).join("|");
+
+  // 1. Month followed by Day: e.g. "September 4", "Sept 4th", "सितंबर 4", "ಸೆಪ್ಟೆಂಬರ್ 4", "september 4 not 3"
+  const m1 = text.match(new RegExp(`(?:${monthRegexPart})\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?`, "i"));
+  if (m1) {
+    const rawMonth = m1[0].replace(/\.?\s*\d{1,2}.*$/, "").toLowerCase().trim();
+    const day = parseInt(m1[1], 10);
+    const stdMonth = monthsMap[rawMonth] || "September";
+    return `${stdMonth} ${day}`;
+  }
+
+  // 2. Day followed by Month: e.g. "4th of September", "4 September", "4th Sept", "4 ಸೆಪ್ಟೆಂಬರ್", "4 सितंबर"
+  const m2 = text.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(${monthRegexPart})`, "i"));
+  if (m2) {
+    const day = parseInt(m2[1], 10);
+    const rawMonth = m2[2].toLowerCase().trim();
+    const stdMonth = monthsMap[rawMonth] || "September";
+    return `${stdMonth} ${day}`;
+  }
+
+  // 3. Negation handling: "4 not 3", "4th not 3rd"
+  const mNot = text.match(/(?:at|on|for)?\s*(\d{1,2})(?:st|nd|rd|th)?\s*(?:not|\bno\b)/i);
+  if (mNot) {
+    const day = parseInt(mNot[1], 10);
+    return `September ${day}`;
+  }
+
+  // 4. ISO Date format: 2026-09-04
+  const isoMatch = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoMatch) {
+    const mNum = parseInt(isoMatch[2], 10);
+    const dNum = parseInt(isoMatch[3], 10);
+    const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    return `${mNames[mNum - 1] || "September"} ${dNum}`;
+  }
+
+  // 5. Relative Day Names
+  if (lower.includes("day after tomorrow") || lower.includes("parson") || text.includes("परसों") || text.includes("ನಾಡಿದ್ದು")) {
+    return "Day after tomorrow";
+  }
+  if (lower.includes("tomorrow") || lower.includes("kal") || text.includes("कल") || text.includes("ನಾಳೆ")) {
+    return "Tomorrow";
+  }
+  if (lower.includes("today") || lower.includes("aaj") || text.includes("आज") || text.includes("ಇಂದು") || text.includes("ಇವತ್ತು")) {
+    return "Today";
+  }
+  if (lower.includes("friday") || text.includes("शुक्रवार") || text.includes("ಶುಕ್ರವಾರ")) {
+    return "This Friday";
+  }
+  if (lower.includes("saturday") || text.includes("शनिवार") || text.includes("ಶನಿವಾರ")) {
+    return "This Saturday";
+  }
+  if (lower.includes("sunday") || text.includes("रविवार") || text.includes("ಭಾನುವಾರ")) {
+    return "This Sunday";
+  }
+  if (lower.includes("monday") || text.includes("सोमवार") || text.includes("ಸೋಮವಾರ")) {
+    return "This Monday";
+  }
+  if (lower.includes("tuesday") || text.includes("मंगलवार") || text.includes("ಮಂಗಳವಾರ")) {
+    return "This Tuesday";
+  }
+  if (lower.includes("wednesday") || text.includes("बुधवार") || text.includes("ಬುಧವಾರ")) {
+    return "This Wednesday";
+  }
+  if (lower.includes("thursday") || text.includes("गुरुवार") || text.includes("ಗುರುವಾರ")) {
+    return "This Thursday";
+  }
+
+  return null;
+}
+
 // Extract entities and structured fields from natural language text with contextual slot filling
 export function extractFieldsFromText(
   text: string,
@@ -181,6 +271,20 @@ export function extractFieldsFromText(
   const extracted: Record<string, any> = { ...currentFields };
   const lower = text.toLowerCase().trim();
   let intent = "general_inquiry";
+
+  // Check for dynamic date in current turn (e.g. September 4, Tomorrow, Friday, etc.)
+  const dynamicDate = parseDynamicDate(text);
+  if (dynamicDate) {
+    if (workflow.fields.some((f) => f.name === "preferred_date")) {
+      extracted.preferred_date = dynamicDate;
+    }
+    if (workflow.fields.some((f) => f.name === "required_date")) {
+      extracted.required_date = dynamicDate;
+    }
+    if (workflow.fields.some((f) => f.name === "visit_date")) {
+      extracted.visit_date = dynamicDate;
+    }
+  }
 
   // 1. CONTEXT-AWARE SLOT FILLING: Check what the assistant just asked for
   const lastAskedField = identifyLastAskedField(conversationHistory, workflow);
@@ -240,6 +344,8 @@ export function extractFieldsFromText(
       const hourRelMatch = text.match(/(?:by|in|within)?\s*(\d+(?:\.\d+)?)\s*(?:hour|hours|hr|hrs|ghante|ghanta|ಗಂಟೆ|ಗಂಟೆಗಳಲ್ಲಿ|ಗಂಟೆಯಲ್ಲಿ)/i);
       if (hourRelMatch) {
         extracted[fieldName] = `In ${hourRelMatch[1]} hours (Today Urgent)`;
+      } else if (dynamicDate) {
+        extracted[fieldName] = dynamicDate;
       } else if (lower.includes("today") || lower.includes("aaj") || lower.includes("tonight") || text.includes("ಇಂದು") || text.includes("ಇವತ್ತು")) {
         extracted[fieldName] = "Today (Urgent)";
       } else if (lower.includes("tomorrow") || lower.includes("kal") || text.includes("ನಾಳೆ")) {
@@ -355,7 +461,7 @@ export function extractFieldsFromText(
     if (lower.includes("book") || lower.includes("appointment") || lower.includes("consult") || text.includes("बुकिंग") || text.includes("अपॉइंटमेंट") || text.includes("मिलना") || text.includes("ಬುಕ್") || text.includes("ಅಪಾಯಿಂಟ್ಮೆಂಟ್") || text.includes("ಭೇಟಿ")) {
       intent = "book_appointment";
       extracted.appointment_intent = "Book New Appointment";
-    } else if (lower.includes("reschedule") || lower.includes("change time") || lower.includes("postpone") || text.includes("बदलना") || text.includes("मರುಹೊಂದಿಸಿ") || text.includes("ಸಮಯ ಬದಲಿಸಿ")) {
+    } else if (lower.includes("reschedule") || lower.includes("change time") || lower.includes("postpone") || text.includes("बदलना") || text.includes("ಮರುಹೊಂದಿಸಿ") || text.includes("ಸಮಯ ಬದಲಿಸಿ")) {
       intent = "reschedule_appointment";
       extracted.appointment_intent = "Reschedule Appointment";
     } else if (lower.includes("cancel") || text.includes("रद्द") || text.includes("ರದ್ದು")) {
@@ -375,16 +481,9 @@ export function extractFieldsFromText(
       }
     }
 
-    // Specific Date Detection (e.g. September 3, Tomorrow, Today, Hindi/Kannada dates)
-    const sepMatch = text.match(/(?:september|sept|sep|सितंबर|सितम्बर|ಸೆಪ್ಟೆಂಬರ್)\.?\s*\d{1,2}/i) || text.match(/\d{1,2}(?:st|nd|rd|th)?\s*(?:september|sept|sep|सितंबर|सितम्बर|ಸೆಪ್ಟೆಂಬರ್)/i);
-    if (sepMatch) {
-      extracted.preferred_date = "September 3";
-    } else if (lower.includes("tomorrow") || lower.includes("kal") || text.includes("कल") || text.includes("ನಾಳೆ")) {
-      extracted.preferred_date = "Tomorrow";
-    } else if (lower.includes("today") || lower.includes("aaj") || text.includes("आज") || text.includes("ಇಂದು") || text.includes("ಇವತ್ತು")) {
-      extracted.preferred_date = "Today";
-    } else if (lower.includes("friday") || text.includes("शुक्रवार") || text.includes("ಶುಕ್ರವಾರ")) {
-      extracted.preferred_date = "This Friday";
+    // Dynamic Date Assignment
+    if (dynamicDate) {
+      extracted.preferred_date = dynamicDate;
     }
 
     // Specific Time Detection (e.g. 12:34 AM, 3:00 PM, 1:30 AM, 4 PM, शाम 4 बजे, ಸಂಜೆ 4 ಗಂಟೆಗೆ)
