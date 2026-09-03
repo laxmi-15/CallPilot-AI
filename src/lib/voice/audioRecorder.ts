@@ -253,15 +253,7 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
       const wavBlob = encodePcmWav(resampledSamples, 16000);
 
-      // If we already got live speech recognition transcript, return it immediately!
-      if (liveTranscript.trim().length > 0) {
-        return {
-          transcript: liveTranscript.trim(),
-          wavBlob,
-        };
-      }
-
-      // Otherwise, query Sarvam Saaras v3 STT with the 100% compliant WAV Blob
+      // 1. Post-speech transcription via Sarvam Saaras v3 STT with standard 16kHz WAV
       try {
         const formData = new FormData();
         formData.append("file", wavBlob, "speech.wav");
@@ -274,7 +266,7 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
         if (res.ok) {
           const data = await res.json();
-          if (data.transcript && data.transcript.trim()) {
+          if (data.transcript && data.transcript.trim().length > 0) {
             return {
               transcript: data.transcript.trim(),
               wavBlob,
@@ -282,9 +274,10 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
           }
         }
       } catch (sarvamErr) {
-        console.warn("Sarvam Saaras STT backup call note:", sarvamErr);
+        console.warn("Sarvam Saaras STT call note:", sarvamErr);
       }
 
+      // 2. Resilient fallback to browser SpeechRecognition transcript
       return {
         transcript: liveTranscript.trim(),
         wavBlob,

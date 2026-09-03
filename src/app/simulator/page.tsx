@@ -200,10 +200,8 @@ export default function SimulatorPage() {
 
       const session = await startAudioCapture({
         language: selectedLanguage,
-        onLiveTranscript: (text, isFinal) => {
+        onLiveTranscript: (text) => {
           setLiveSpokenText(text);
-          // ChatGPT style: stream live transcribed words directly into input text box
-          setInputText(text);
         },
         onVolumeChange: setLiveVolume,
         onError: (err) => {
@@ -1347,15 +1345,17 @@ export default function SimulatorPage() {
                     </div>
                   </div>
 
-                  {/* Live Real-time Transcribed Words Box */}
-                  <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs font-medium text-indigo-100 italic min-h-[32px] flex items-center">
-                    {liveSpokenText ? (
-                      <span className="text-white font-semibold not-italic">&ldquo;{liveSpokenText}&rdquo;</span>
-                    ) : (
-                      <span className="text-slate-400">
-                        Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Transcribing live as you speak!
+                  {/* Recording Status Box */}
+                  <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs font-medium text-indigo-100 min-h-[32px] flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-rose-400 animate-ping" />
+                      <span>
+                        Recording in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Speak your message now.
                       </span>
-                    )}
+                    </div>
+                    <span className="text-[10px] text-slate-300 font-mono hidden sm:inline">
+                      Click &lsquo;Done Speaking&rsquo; to transcribe
+                    </span>
                   </div>
                 </div>
               ) : isTranscribing ? (
