@@ -32,6 +32,8 @@ import {
   Pause,
   Sliders,
   PhoneOff,
+  Trash2,
+  CornerDownLeft,
 } from "lucide-react";
 import { storageRepo, AppState } from "@/lib/store/storage";
 import { PREBUILT_TEMPLATES } from "@/lib/workflow/templates";
@@ -65,15 +67,15 @@ export default function SimulatorPage() {
   const [isCallEnded, setIsCallEnded] = useState(false);
   const [isLiveCallActive, setIsLiveCallActive] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
-  const [autoListenAfterSpeech, setAutoListenAfterSpeech] = useState(true);
+  const [autoListenAfterSpeech, setAutoListenAfterSpeech] = useState(false);
 
   // =========================================================================
-  // VOICE DICTATION & REAL MULTILINGUAL ENGINE
+  // CHATGPT-STYLE VOICE DICTATION & EDIT WORKFLOW
   // =========================================================================
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [voiceModeType, setVoiceModeType] = useState<"dictate" | "live_call">("live_call");
+  const [voiceModeType, setVoiceModeType] = useState<"dictate" | "live_call">("dictate");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceProviderStatus, setVoiceProviderStatus] = useState<{ configured: boolean; provider: string } | null>(null);
   const [voiceCreditExhausted, setVoiceCreditExhausted] = useState(false);
@@ -81,6 +83,7 @@ export default function SimulatorPage() {
   const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | null>(null);
   const [isTestingAudio, setIsTestingAudio] = useState(false);
   const [liveSpokenText, setLiveSpokenText] = useState<string>("");
+  const [hasTranscribedSpeech, setHasTranscribedSpeech] = useState<boolean>(false);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +164,7 @@ export default function SimulatorPage() {
     setVoiceErrorMessage(null);
     setPlayingMessageId(null);
     setLiveSpokenText("");
+    setHasTranscribedSpeech(false);
   }, [selectedIndustry, selectedLanguage]);
 
   useEffect(() => {
@@ -179,7 +183,7 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // AUDIO CAPTURE & LIVE SPEECH-TO-TEXT
+  // CHATGPT-STYLE AUDIO CAPTURE & LIVE SPEECH TRANSCRIBING
   // =========================================================================
   const startRecording = async () => {
     try {
@@ -192,14 +196,14 @@ export default function SimulatorPage() {
       setVoiceErrorMessage(null);
       setRecordingSeconds(0);
       setLiveSpokenText("");
+      setHasTranscribedSpeech(false);
 
       const session = await startAudioCapture({
         language: selectedLanguage,
         onLiveTranscript: (text, isFinal) => {
           setLiveSpokenText(text);
-          if (voiceModeType === "dictate") {
-            setInputText(text);
-          }
+          // ChatGPT style: stream live transcribed words directly into input text box
+          setInputText(text);
         },
         onVolumeChange: setLiveVolume,
         onError: (err) => {
@@ -223,6 +227,7 @@ export default function SimulatorPage() {
     }
   };
 
+  // User clicks Done / Finish Speaking -> Populates text box and opens Edit Review!
   const stopAndTranscribe = async () => {
     if (!isRecording || !recordingSessionRef.current) return;
 
@@ -241,16 +246,21 @@ export default function SimulatorPage() {
       setLiveVolume(0);
 
       const result = await session.stop();
-      const finalTranscript = (result.transcript || liveSpokenText || "").trim();
+      const finalTranscript = (result.transcript || liveSpokenText || inputText || "").trim();
 
       if (finalTranscript) {
+        setInputText(finalTranscript);
+        setHasTranscribedSpeech(true);
+
         if (voiceModeType === "live_call") {
+          // Hands-free continuous call mode auto-sends
           await handleSendMessage(finalTranscript);
         } else {
-          setInputText(finalTranscript);
+          // ChatGPT-Style Dictate Mode: Keeps text in input box with focus for instant editing!
           setTimeout(() => {
             inputRef.current?.focus();
-          }, 100);
+            inputRef.current?.select();
+          }, 150);
         }
       }
     } catch (err: any) {
@@ -281,7 +291,7 @@ export default function SimulatorPage() {
   // =========================================================================
   // DUAL-ENGINE AI SPEECH PLAYBACK (Sarvam Bulbul v3 + Web Speech Fallback)
   // =========================================================================
-  const speakAIResponse = async (textToSpeak: string, responseId?: string, autoListenAfter = true) => {
+  const speakAIResponse = async (textToSpeak: string, responseId?: string, autoListenAfter = false) => {
     if (!audioEnabled || voiceCreditExhausted) return;
 
     try {
@@ -304,7 +314,7 @@ export default function SimulatorPage() {
           setVoiceState("idle");
           setPlayingMessageId(null);
 
-          // In hands-free live call mode, automatically listen after agent finishes speaking!
+          // In hands-free live call mode, automatically listen after agent finishes speaking
           if (voiceModeType === "live_call" && autoListenAfter && !isCallEnded && autoListenAfterSpeech) {
             setTimeout(() => {
               if (!isSpeakingRef.current && !isRecording) {
@@ -353,7 +363,7 @@ export default function SimulatorPage() {
       await voiceEngine.unlockAudio();
       setIsLiveCallActive(true);
       setIsCallEnded(false);
-      setVoiceModeType("live_call");
+      setVoiceModeType("dictate"); // ChatGPT Dictate & Edit by default for maximum user control!
 
       // Play ringing and connect chime
       await voiceEngine.playRingTone(1.2);
@@ -361,7 +371,7 @@ export default function SimulatorPage() {
 
       // Speak initial greeting automatically!
       const initialGreetingMsg = messages[0]?.content || activeWorkflow.greeting;
-      await speakAIResponse(initialGreetingMsg, messages[0]?.id, true);
+      await speakAIResponse(initialGreetingMsg, messages[0]?.id, false);
     } catch (e) {
       console.warn("Start voice call error:", e);
     }
@@ -396,6 +406,8 @@ export default function SimulatorPage() {
 
     setInputText("");
     setLiveSpokenText("");
+    setHasTranscribedSpeech(false);
+
     const userMsg: Message = {
       id: generateId("msg_user"),
       conversationId: "sim_conv",
@@ -488,7 +500,7 @@ export default function SimulatorPage() {
 
       // Trigger Voice Playback with Dual-Engine Voice Synthesizer
       if (audioEnabled) {
-        speakAIResponse(result.reply, responseId, true);
+        speakAIResponse(result.reply, responseId, voiceModeType === "live_call");
       }
     } catch (err: any) {
       console.error("Simulation error:", err);
@@ -541,6 +553,7 @@ export default function SimulatorPage() {
     setInputText("");
     setPlayingMessageId(null);
     setLiveSpokenText("");
+    setHasTranscribedSpeech(false);
   };
 
   const handleSaveToDashboard = () => {
@@ -647,9 +660,9 @@ export default function SimulatorPage() {
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60 flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
-              Voice-First AI Assistant Cockpit
+              ChatGPT-Style Voice Dictation & Edit
             </span>
-            <span className="text-[10px] font-mono text-slate-400">Sarvam Bulbul v3 + Live Web Speech</span>
+            <span className="text-[10px] font-mono text-slate-400">Speak &bull; Transcribe &bull; Edit &bull; Send</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5 pt-1">
@@ -717,31 +730,31 @@ export default function SimulatorPage() {
             </button>
           </div>
 
-          {/* Voice Mode Selector: Live Voice Call vs Dictate */}
+          {/* Voice Mode Selector */}
           <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
             <button
-              onClick={() => setVoiceModeType("live_call")}
+              onClick={() => setVoiceModeType("dictate")}
               className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                voiceModeType === "dictate"
+                  ? "bg-indigo-600 text-white shadow-xs scale-[1.02]"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+              title="Speak -> Transcribe live -> Edit text -> Send"
+            >
+              <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
+              <span>Dictate & Edit (ChatGPT)</span>
+            </button>
+            <button
+              onClick={() => setVoiceModeType("live_call")}
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
                 voiceModeType === "live_call"
                   ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
               }`}
-              title="Hands-free continuous phone call simulation"
+              title="Continuous live call with auto-turn taking"
             >
               <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
-              <span>Voice-First Call</span>
-            </button>
-            <button
-              onClick={() => setVoiceModeType("dictate")}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                voiceModeType === "dictate"
-                  ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-              title="Speak -> Transcribe live into text box -> Edit -> Send"
-            >
-              <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
-              <span>Dictate & Edit</span>
+              <span>Live Call</span>
             </button>
           </div>
 
@@ -766,10 +779,10 @@ export default function SimulatorPage() {
             title="Test Voice Audio Output"
           >
             <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
-            <span>{isTestingAudio ? "Playing Audio..." : "Test Audio"}</span>
+            <span>{isTestingAudio ? "Playing..." : "Test Audio"}</span>
           </button>
 
-          {/* Audio TTS Output Toggle */}
+          {/* Audio Output Toggle */}
           <button
             onClick={() => setAudioEnabled(!audioEnabled)}
             className={`p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border transition-all cursor-pointer ${
@@ -801,7 +814,7 @@ export default function SimulatorPage() {
             leftIcon={<Save className="h-3.5 w-3.5" />}
             className="rounded-xl sm:rounded-2xl shadow-md text-xs"
           >
-            {savedSuccess ? "✓ Logged to CRM!" : "Save"}
+            {savedSuccess ? "✓ Logged!" : "Save"}
           </Button>
         </div>
       </div>
@@ -851,13 +864,11 @@ export default function SimulatorPage() {
                 dot={isLiveCallActive}
                 className="text-[10px]"
               >
-                {isLiveCallActive ? "Call in Progress" : "Ready to Call"}
+                {isLiveCallActive ? "Call in Progress" : "Ready"}
               </Badge>
             </div>
             <p className="text-xs text-indigo-200/80 mt-0.5">
-              {isLiveCallActive
-                ? "Agent speaks responses automatically • Real-time live transcription active"
-                : `Click 'Start Live Voice Call' or click 'Speak' to talk directly with the AI in ${selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.`}
+              Click &lsquo;Speak 🎙️&rsquo; to dictate your message, transcribe speech live to text, and edit before sending in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.
             </p>
           </div>
         </div>
@@ -1029,14 +1040,14 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 2: LIVE VOICE STREAM & PER-MESSAGE VOICE REPLAY
+            COLUMN 2: CHATGPT-STYLE DICTATE, LIVE TRANSCRIBE & EDIT BAR
         ========================================================================== */}
         <div className="lg:col-span-8 xl:col-span-6 space-y-3.5 sm:space-y-4">
           <div className="glass-card-luxury rounded-2xl sm:rounded-3xl flex flex-col h-[540px] sm:h-[600px] lg:h-[640px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
-            {/* High-End Voice Call Header */}
+            {/* Header */}
             <div className="p-3 sm:p-4 border-b border-slate-100/90 flex items-center justify-between bg-gradient-to-r from-slate-50/90 via-indigo-50/30 to-purple-50/30">
               <div className="flex items-center gap-2.5 sm:gap-3">
-                {/* Caller Avatar with Live Pulse Rings */}
+                {/* Caller Avatar */}
                 <div className="relative flex h-8 sm:h-10 w-8 sm:w-10 items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30 shrink-0">
                   <PhoneCall className="h-4 sm:h-5 w-4 sm:w-5" />
                   {voiceState === "speaking" && (
@@ -1053,7 +1064,7 @@ export default function SimulatorPage() {
                 <div>
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 truncate max-w-[160px] sm:max-w-none">
-                      CallPilot Voice Engine
+                      CallPilot AI Assistant
                     </h3>
                     <Badge
                       variant={
@@ -1077,12 +1088,12 @@ export default function SimulatorPage() {
                         : voiceState === "speaking"
                         ? "🔊 Agent Speaking"
                         : isRecording
-                        ? "🎙️ Caller Speaking"
+                        ? "🎙️ Transcribing Voice..."
                         : isTranscribing
-                        ? "⚡ Transcribing"
+                        ? "⚡ Processing"
                         : isLiveCallActive
                         ? "Live Call Active"
-                        : "Ready"}
+                        : "Ready to Speak"}
                     </Badge>
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1 sm:gap-1.5 mt-0.5">
@@ -1251,9 +1262,43 @@ export default function SimulatorPage() {
             </div>
 
             {/* =========================================================================
-                VOICE INPUT & LIVE TRANSCRIPTION BAR
+                CHATGPT-STYLE DICTATE & EDIT INPUT BAR
             ========================================================================== */}
-            <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/90">
+            <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/95 space-y-2">
+              {/* Review & Edit Banner (Appears after speech transcription so user can review) */}
+              {hasTranscribedSpeech && !isRecording && inputText.trim() && (
+                <div className="flex items-center justify-between p-2 rounded-xl bg-indigo-50/90 border border-indigo-200 text-indigo-950 text-xs animate-in fade-in slide-in-from-bottom-2 duration-200">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Edit3 className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                    <span className="font-bold text-[11px] text-indigo-900 truncate">
+                      Speech Transcribed — Edit text in box below or click Send:
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      className="px-2 py-0.5 rounded-lg bg-white border border-indigo-200 text-indigo-700 text-[10px] font-bold hover:bg-indigo-100 flex items-center gap-1 cursor-pointer"
+                      title="Speak more into this message"
+                    >
+                      <Mic className="h-3 w-3 text-indigo-600" />
+                      <span>Speak More</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputText("");
+                        setHasTranscribedSpeech(false);
+                      }}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-indigo-100 cursor-pointer"
+                      title="Clear text"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {isRecording ? (
                 /* Active Recording State (Waveform + Live Spoken Words + Done / Cancel) */
                 <div className="flex flex-col gap-2 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-xl animate-in fade-in duration-200">
@@ -1289,15 +1334,15 @@ export default function SimulatorPage() {
                         <X className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
                       </button>
 
-                      {/* Done / Transcribe Button */}
+                      {/* Done / Finish Speaking -> Put in text box for editing! */}
                       <button
                         type="button"
                         onClick={stopAndTranscribe}
                         className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1 sm:gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
-                        title="Finish speaking and send"
+                        title="Finish speaking and edit text"
                       >
                         <Check className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
-                        <span>Send</span>
+                        <span>Done Speaking</span>
                       </button>
                     </div>
                   </div>
@@ -1308,7 +1353,7 @@ export default function SimulatorPage() {
                       <span className="text-white font-semibold not-italic">&ldquo;{liveSpokenText}&rdquo;</span>
                     ) : (
                       <span className="text-slate-400">
-                        Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Speak now!
+                        Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Transcribing live as you speak!
                       </span>
                     )}
                   </div>
@@ -1333,10 +1378,14 @@ export default function SimulatorPage() {
                     type="button"
                     onClick={startRecording}
                     disabled={isLoading || voiceState === "speaking"}
-                    className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-400 text-indigo-700 transition-all cursor-pointer shrink-0 shadow-2xs group flex items-center gap-1.5 font-bold text-xs"
-                    title="Click to speak (Voice Input)"
+                    className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border transition-all cursor-pointer shrink-0 shadow-2xs group flex items-center gap-1.5 font-bold text-xs ${
+                      hasTranscribedSpeech
+                        ? "bg-slate-100 hover:bg-indigo-50 border-slate-300 text-slate-700 hover:text-indigo-700"
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20"
+                    }`}
+                    title="Click to speak (ChatGPT Voice Dictation)"
                   >
-                    <Mic className="h-4 w-4 text-indigo-600 group-hover:scale-110 transition-transform" />
+                    <Mic className={`h-4 w-4 ${hasTranscribedSpeech ? "text-indigo-600" : "text-white"} group-hover:scale-110 transition-transform`} />
                     <span className="hidden sm:inline">Speak</span>
                   </button>
 
@@ -1349,12 +1398,16 @@ export default function SimulatorPage() {
                           ? "ಕರೆ ಮಾಡುವವರು ಏನು ಹೇಳುತ್ತಾರೆಂದು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ 'Speak' ಕ್ಲಿಕ್ ಮಾಡಿ..."
                           : selectedLanguage === "hi"
                           ? "कॉल करने वाले की बात लिखें या 'Speak' पर क्लिक करें..."
-                          : "Type or click Speak (e.g. 'Priya', 'Tomorrow at 3 PM')..."
+                          : "Speak or type (e.g. 'Priya', 'Tomorrow at 3 PM')..."
                       }
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
                       disabled={isLoading}
-                      className="w-full rounded-xl sm:rounded-2xl bg-slate-50/90 border border-slate-300/90 px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium"
+                      className={`w-full rounded-xl sm:rounded-2xl bg-slate-50/90 border px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium ${
+                        hasTranscribedSpeech
+                          ? "border-indigo-400 ring-2 ring-indigo-300/30 bg-white"
+                          : "border-slate-300/90"
+                      }`}
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">Enter ↵</span>
