@@ -40,6 +40,7 @@ import { Message, ToolCallRecord, UrgencyLevel, LanguageCode, Workflow, VoiceSta
 import { Button, Badge, ProgressBar } from "@/components/ui";
 import { generateId, formatTime } from "@/lib/utils";
 import { voiceEngine, VoiceLanguage, VoiceSpeaker } from "@/lib/voice/voiceEngine";
+import { startAudioCapture, RecordingSession } from "@/lib/voice/audioRecorder";
 
 export default function SimulatorPage() {
   const [appState, setAppState] = useState<AppState>(storageRepo.getState());
@@ -79,17 +80,13 @@ export default function SimulatorPage() {
   const [liveVolume, setLiveVolume] = useState<number>(0);
   const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | null>(null);
   const [isTestingAudio, setIsTestingAudio] = useState(false);
+  const [liveSpokenText, setLiveSpokenText] = useState<string>("");
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const recTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const animFrameRef = useRef<number | null>(null);
+  const recordingSessionRef = useRef<RecordingSession | null>(null);
   const isSpeakingRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -127,7 +124,7 @@ export default function SimulatorPage() {
   // Clean up audio streams on unmount
   useEffect(() => {
     return () => {
-      stopMicrophoneStream();
+      cancelRecording();
       voiceEngine.stopSpeaking();
     };
   }, []);
@@ -163,6 +160,7 @@ export default function SimulatorPage() {
     setCallDuration(0);
     setVoiceErrorMessage(null);
     setPlayingMessageId(null);
+    setLiveSpokenText("");
   }, [selectedIndustry, selectedLanguage]);
 
   useEffect(() => {
@@ -181,11 +179,10 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // AUDIO CAPTURE & STREAMING VISUALIZER
+  // AUDIO CAPTURE & LIVE SPEECH-TO-TEXT
   // =========================================================================
   const startRecording = async () => {
     try {
-      // If assistant is currently speaking, stop it first
       if (voiceEngine.getIsSpeaking()) {
         voiceEngine.stopSpeaking();
       }
@@ -194,163 +191,66 @@ export default function SimulatorPage() {
       setVoiceState("requesting_permission");
       setVoiceErrorMessage(null);
       setRecordingSeconds(0);
+      setLiveSpokenText("");
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+      const session = await startAudioCapture({
+        language: selectedLanguage,
+        onLiveTranscript: (text, isFinal) => {
+          setLiveSpokenText(text);
+          if (voiceModeType === "dictate") {
+            setInputText(text);
+          }
+        },
+        onVolumeChange: setLiveVolume,
+        onError: (err) => {
+          setVoiceErrorMessage(err);
+          setVoiceState("error");
+          setIsRecording(false);
         },
       });
 
-      audioStreamRef.current = stream;
-
-      // Web Audio Analyser for real-time soundwave animation
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioCtxClass();
-      audioContextRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 64;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const updateVolume = () => {
-        if (analyserRef.current && !isSpeakingRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i];
-          }
-          const avg = sum / dataArray.length;
-          setLiveVolume(Math.min(100, Math.round((avg / 128) * 100)));
-        }
-        animFrameRef.current = requestAnimationFrame(updateVolume);
-      };
-      updateVolume();
-
-      // Setup MediaRecorder
-      const options = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? { mimeType: "audio/webm;codecs=opus" }
-        : {};
-      const recorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0 && !isSpeakingRef.current) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.start(250);
+      recordingSessionRef.current = session;
       setIsRecording(true);
       setVoiceState("listening");
 
-      // Start recording timer
       recTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
     } catch (err: any) {
-      console.error("Microphone access error:", err);
+      console.error("Microphone capture error:", err);
       setVoiceState("error");
       setIsRecording(false);
-      setVoiceErrorMessage(
-        err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
-          ? "Microphone permission was denied. Please allow microphone access in your browser."
-          : "Could not access microphone. Text mode remains active."
-      );
     }
   };
 
-  const stopMicrophoneStream = () => {
-    if (recTimerRef.current) {
-      clearInterval(recTimerRef.current);
-      recTimerRef.current = null;
-    }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {}
-      mediaRecorderRef.current = null;
-    }
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach((t) => t.stop());
-      audioStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      try {
-        audioContextRef.current.close();
-      } catch (e) {}
-      audioContextRef.current = null;
-    }
-    setIsRecording(false);
-    setLiveVolume(0);
-  };
-
-  // User clicks Done / Stop Recording: Transcribe via Sarvam Saaras v3
   const stopAndTranscribe = async () => {
-    if (!isRecording) return;
+    if (!isRecording || !recordingSessionRef.current) return;
 
     try {
+      if (recTimerRef.current) {
+        clearInterval(recTimerRef.current);
+        recTimerRef.current = null;
+      }
+
       setIsTranscribing(true);
       setVoiceState("processing");
 
-      // Capture final chunks
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.requestData();
-      }
+      const session = recordingSessionRef.current;
+      recordingSessionRef.current = null;
+      setIsRecording(false);
+      setLiveVolume(0);
 
-      // Small delay to collect final chunk
-      await new Promise((r) => setTimeout(r, 150));
+      const result = await session.stop();
+      const finalTranscript = (result.transcript || liveSpokenText || "").trim();
 
-      const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-      stopMicrophoneStream();
-      audioChunksRef.current = [];
-
-      if (audioBlob.size === 0) {
-        setIsTranscribing(false);
-        setVoiceState("idle");
-        return;
-      }
-
-      const formData = new FormData();
-      formData.append("file", audioBlob, "speech.webm");
-      formData.append("language", selectedLanguage);
-
-      const sttRes = await fetch("/api/voice/stt", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (sttRes.status === 402) {
-        setVoiceCreditExhausted(true);
-        setVoiceState("error");
-        setVoiceErrorMessage("Voice credits are exhausted. Text mode is still available.");
-        setIsTranscribing(false);
-        return;
-      }
-
-      if (sttRes.ok) {
-        const data = await sttRes.json();
-        const transcript = data.transcript?.trim();
-
-        if (transcript) {
-          if (voiceModeType === "live_call") {
-            // Auto-send in hands-free live call mode
-            await handleSendMessage(transcript);
-          } else {
-            // Dictate mode: populate input box for review
-            setInputText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
-            setTimeout(() => {
-              inputRef.current?.focus();
-            }, 100);
-          }
+      if (finalTranscript) {
+        if (voiceModeType === "live_call") {
+          await handleSendMessage(finalTranscript);
+        } else {
+          setInputText(finalTranscript);
+          setTimeout(() => {
+            inputRef.current?.focus();
+          }, 100);
         }
       }
     } catch (err: any) {
@@ -358,15 +258,24 @@ export default function SimulatorPage() {
     } finally {
       setIsTranscribing(false);
       setVoiceState("idle");
+      setLiveSpokenText("");
     }
   };
 
-  // User cancels recording
   const cancelRecording = () => {
-    stopMicrophoneStream();
-    audioChunksRef.current = [];
+    if (recTimerRef.current) {
+      clearInterval(recTimerRef.current);
+      recTimerRef.current = null;
+    }
+    if (recordingSessionRef.current) {
+      recordingSessionRef.current.cancel();
+      recordingSessionRef.current = null;
+    }
+    setIsRecording(false);
     setIsTranscribing(false);
     setVoiceState("idle");
+    setLiveVolume(0);
+    setLiveSpokenText("");
   };
 
   // =========================================================================
@@ -430,7 +339,6 @@ export default function SimulatorPage() {
   // Play / Replay specific message
   const handleReplayMessage = async (msg: Message) => {
     if (playingMessageId === msg.id) {
-      // Toggle stop
       handleInterruptSpeaking();
       return;
     }
@@ -460,7 +368,7 @@ export default function SimulatorPage() {
   };
 
   const handleEndVoiceCall = async () => {
-    stopMicrophoneStream();
+    cancelRecording();
     voiceEngine.stopSpeaking();
     isSpeakingRef.current = false;
     await voiceEngine.playHangupTone();
@@ -487,6 +395,7 @@ export default function SimulatorPage() {
     if (!text.trim() || isLoading) return;
 
     setInputText("");
+    setLiveSpokenText("");
     const userMsg: Message = {
       id: generateId("msg_user"),
       conversationId: "sim_conv",
@@ -631,6 +540,7 @@ export default function SimulatorPage() {
     setCallDuration(0);
     setInputText("");
     setPlayingMessageId(null);
+    setLiveSpokenText("");
   };
 
   const handleSaveToDashboard = () => {
@@ -739,7 +649,7 @@ export default function SimulatorPage() {
               <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
               Voice-First AI Assistant Cockpit
             </span>
-            <span className="text-[10px] font-mono text-slate-400">Sarvam Bulbul v3 + Web Speech Fallback</span>
+            <span className="text-[10px] font-mono text-slate-400">Sarvam Bulbul v3 + Live Web Speech</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5 pt-1">
@@ -768,7 +678,7 @@ export default function SimulatorPage() {
           </div>
         </div>
 
-        {/* Right Action Controls: Language Toggle, Mode Toggle, Voice Speed, Test Audio, Reset */}
+        {/* Right Action Controls */}
         <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
           {/* Multilingual Selector: English, Hindi, Kannada */}
           <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
@@ -828,7 +738,7 @@ export default function SimulatorPage() {
                   ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
               }`}
-              title="Speak -> Transcribe into text box -> Edit -> Send"
+              title="Speak -> Transcribe live into text box -> Edit -> Send"
             >
               <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
               <span>Dictate & Edit</span>
@@ -896,16 +806,16 @@ export default function SimulatorPage() {
         </div>
       </div>
 
-      {/* Credit Exhausted or Error Banner */}
+      {/* Error Banners */}
       {voiceCreditExhausted && (
         <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between text-xs shadow-sm">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
             <span className="font-semibold">
-              Voice credits exhausted. Native browser speech synthesis & text mode active with full Gemini reasoning.
+              Voice credits exhausted. Browser speech synthesis & text mode active with full Gemini reasoning.
             </span>
           </div>
-          <Badge variant="warning" className="text-[10px]">₹0 Safety Active</Badge>
+          <Badge variant="warning" className="text-[10px]">₹0 Protected</Badge>
         </div>
       )}
 
@@ -946,8 +856,8 @@ export default function SimulatorPage() {
             </div>
             <p className="text-xs text-indigo-200/80 mt-0.5">
               {isLiveCallActive
-                ? "Agent speaks responses automatically • Hands-free turn-taking active"
-                : `Click 'Start Live Voice Call' to speak directly with the AI in ${selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.`}
+                ? "Agent speaks responses automatically • Real-time live transcription active"
+                : `Click 'Start Live Voice Call' or click 'Speak' to talk directly with the AI in ${selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.`}
             </p>
           </div>
         </div>
@@ -1341,64 +1251,73 @@ export default function SimulatorPage() {
             </div>
 
             {/* =========================================================================
-                VOICE INPUT & DICTATION BAR
+                VOICE INPUT & LIVE TRANSCRIPTION BAR
             ========================================================================== */}
             <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/90">
               {isRecording ? (
-                /* Active Recording State (Waveform + Done / Cancel) */
-                <div className="flex items-center justify-between gap-2.5 sm:gap-3 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-xl animate-in fade-in duration-200">
-                  <div className="flex items-center gap-2 pl-1.5">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
-                    </span>
-                    <span className="font-mono text-xs font-bold text-rose-300">
-                      {formatCallDuration(recordingSeconds)}
-                    </span>
+                /* Active Recording State (Waveform + Live Spoken Words + Done / Cancel) */
+                <div className="flex flex-col gap-2 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-xl animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 pl-1.5">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+                      </span>
+                      <span className="font-mono text-xs font-bold text-rose-300">
+                        {formatCallDuration(recordingSeconds)}
+                      </span>
+                    </div>
+
+                    {/* Dynamic Soundwave Visualizer Bars */}
+                    <div className="flex items-center gap-1 h-5 sm:h-6">
+                      <div className={`w-1 bg-rose-400 rounded-full transition-all duration-75 ${liveVolume > 10 ? "h-4 sm:h-5" : "h-1.5"}`} />
+                      <div className={`w-1 bg-indigo-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-6" : "h-2"}`} />
+                      <div className={`w-1 bg-purple-300 rounded-full transition-all duration-75 ${liveVolume > 30 ? "h-6 sm:h-7" : "h-2.5"}`} />
+                      <div className={`w-1 bg-rose-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-5" : "h-2"}`} />
+                      <div className={`w-1 bg-indigo-400 rounded-full transition-all duration-75 ${liveVolume > 15 ? "h-5 sm:h-6" : "h-2"}`} />
+                      <div className={`w-1 bg-purple-400 rounded-full transition-all duration-75 ${liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      {/* Cancel Recording */}
+                      <button
+                        type="button"
+                        onClick={cancelRecording}
+                        className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-all cursor-pointer"
+                        title="Cancel recording"
+                      >
+                        <X className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
+                      </button>
+
+                      {/* Done / Transcribe Button */}
+                      <button
+                        type="button"
+                        onClick={stopAndTranscribe}
+                        className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1 sm:gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
+                        title="Finish speaking and send"
+                      >
+                        <Check className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
+                        <span>Send</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Dynamic Soundwave Visualizer Bars */}
-                  <div className="flex items-center gap-1 h-5 sm:h-6">
-                    <div className={`w-1 bg-rose-400 rounded-full transition-all duration-75 ${liveVolume > 10 ? "h-4 sm:h-5" : "h-1.5"}`} />
-                    <div className={`w-1 bg-indigo-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-6" : "h-2"}`} />
-                    <div className={`w-1 bg-purple-300 rounded-full transition-all duration-75 ${liveVolume > 30 ? "h-6 sm:h-7" : "h-2.5"}`} />
-                    <div className={`w-1 bg-rose-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-5" : "h-2"}`} />
-                    <div className={`w-1 bg-indigo-400 rounded-full transition-all duration-75 ${liveVolume > 15 ? "h-5 sm:h-6" : "h-2"}`} />
-                    <div className={`w-1 bg-purple-400 rounded-full transition-all duration-75 ${liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
-                  </div>
-
-                  <span className="text-[11px] sm:text-xs text-slate-300 font-medium hidden md:inline">
-                    Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}...
-                  </span>
-
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    {/* Cancel Recording */}
-                    <button
-                      type="button"
-                      onClick={cancelRecording}
-                      className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-all cursor-pointer"
-                      title="Cancel recording"
-                    >
-                      <X className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
-                    </button>
-
-                    {/* Done / Transcribe Button */}
-                    <button
-                      type="button"
-                      onClick={stopAndTranscribe}
-                      className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1 sm:gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
-                      title="Transcribe and process message"
-                    >
-                      <Check className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
-                      <span>Done</span>
-                    </button>
+                  {/* Live Real-time Transcribed Words Box */}
+                  <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs font-medium text-indigo-100 italic min-h-[32px] flex items-center">
+                    {liveSpokenText ? (
+                      <span className="text-white font-semibold not-italic">&ldquo;{liveSpokenText}&rdquo;</span>
+                    ) : (
+                      <span className="text-slate-400">
+                        Listening in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Speak now!
+                      </span>
+                    )}
                   </div>
                 </div>
               ) : isTranscribing ? (
                 /* Transcribing Loader State */
                 <div className="flex items-center justify-center gap-2 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold animate-pulse">
                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                  <span>Transcribing speech ({selectedLanguage === "kn" ? "kn-IN" : selectedLanguage === "hi" ? "hi-IN" : "en-IN"})...</span>
+                  <span>Processing speech ({selectedLanguage === "kn" ? "kn-IN" : selectedLanguage === "hi" ? "hi-IN" : "en-IN"})...</span>
                 </div>
               ) : (
                 /* Standard ChatGPT Input Form with Dedicated Mic Button */
