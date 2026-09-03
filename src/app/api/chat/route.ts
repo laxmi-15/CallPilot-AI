@@ -22,6 +22,8 @@ export async function POST(req: NextRequest) {
       PREBUILT_TEMPLATES[business.type] || 
       PREBUILT_TEMPLATES.cake_shop;
 
+    const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+
     const result = await processConversationTurn({
       business,
       workflow,
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
       extractedFields: extractedFields || {},
       callerPhone: callerPhone || "+1 (555) 000-1122",
       language,
-      apiKey,
+      apiKey: effectiveApiKey,
     });
 
     return NextResponse.json(result);

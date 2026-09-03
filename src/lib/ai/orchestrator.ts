@@ -28,6 +28,8 @@ export interface AIProcessOutput {
 
 // Detect language (English vs Hindi / Hinglish vs Kannada) - Strict and robust
 export function detectLanguage(text: string, currentLang: LanguageCode = "en"): LanguageCode {
+  if (!text) return currentLang;
+
   // 1. Kannada Unicode block Check (U+0C80 to U+0CFF)
   const hasKannada = /[\u0C80-\u0CFF]/.test(text);
   if (hasKannada) return "kn";
@@ -35,7 +37,8 @@ export function detectLanguage(text: string, currentLang: LanguageCode = "en"): 
   // 2. Kannada keywords in Roman script
   const kannadaKeywords = [
     "namaskara", "beku", "naale", "ivattu", "indu", "samaya", "hesaru", "eshtu",
-    "madabeku", "hogi", "banni", "kodu", "illi", "nanna", "nanage", "yaavaga", "yelli"
+    "madabeku", "hogi", "banni", "kodu", "illi", "nanna", "nanage", "yaavaga", "yelli",
+    "houdu", "sari", "dhanyavadagalu", "matte", "kushi"
   ];
   const lower = text.toLowerCase();
   const hasKannadaRoman = kannadaKeywords.some((word) => new RegExp(`\\b${word}\\b`, "i").test(lower));
@@ -49,7 +52,7 @@ export function detectLanguage(text: string, currentLang: LanguageCode = "en"): 
   const hindiKeywords = [
     "namaste", "chahiye", "karna", "mera", "naam", "kitna", "rupaye", "mujhe",
     "shukriya", "dhanyawad", "shubh", "bhai", "karo", "kab", "kaha", "kripya", "theek",
-    "parson", "subah", "shaam", "dopahar", "ghante", "ghanta"
+    "parson", "subah", "shaam", "dopahar", "ghante", "ghanta", "haan", "ji"
   ];
   const hasHinglish = hindiKeywords.some((word) => new RegExp(`\\b${word}\\b`, "i").test(lower));
   if (hasHinglish) return "hinglish";
@@ -152,15 +155,21 @@ export function parseCleanName(rawText: string): string | null {
   // If Kannada script text remains
   if (/[\u0C80-\u0CFF]/.test(cleaned)) {
     const knWords = cleaned.split(/\s+/).filter(Boolean);
-    const stopWordsKn = ["ಕೇಕ್", "ಆರ್ಡರ್", "ಅಪಾಯಿಂಟ್ಮೆಂಟ್", "ಡಾಕ್ಟರ್", "ವೈದ್ಯರು", "ಬೇಕು", "ನಾಳೆ", "ಸಂಜೆ", "ಬೆಳಿಗ್ಗೆ"];
-    const filtered = knWords.filter(w => !stopWordsKn.includes(w));
+    const stopWordsKn = ["ಕೇಕ್", "ಆರ್ಡರ್", "ಅಪಾಯಿಂಟ್ಮೆಂಟ್", "ಡಾಕ್ಟರ್", "ವೈದ್ಯರು", "ಬೇಕು", "ನಾಳೆ", "ಸಂಜೆ", "ಬೆಳಿಗ್ಗೆ", "ಚಾಕೊಲೇಟ್"];
+    const filtered = knWords.filter((w) => !stopWordsKn.includes(w));
     if (filtered.length >= 1 && filtered.length <= 3) {
       return filtered.join(" ");
     }
   }
 
   const words = cleaned.split(/\s+/).filter(Boolean);
-  const stopWords = ["cake", "order", "delivery", "pickup", "urgent", "book", "appointment", "doctor", "track", "package", "need", "want", "help"];
+  const stopWords = [
+    "cake", "chocolate", "vanilla", "velvet", "truffle", "order", "delivery", "pickup", "urgent",
+    "book", "appointment", "doctor", "track", "package", "need", "want", "help", "kg", "kilo",
+    "today", "tomorrow", "tonight", "morning", "evening", "afternoon", "pm", "am", "hours",
+    "birthday", "wedding", "anniversary", "custom", "message", "pastry", "cupcake"
+  ];
+
   if (words.length >= 1 && words.length <= 4) {
     const hasStopWord = words.some((w) => stopWords.includes(w.toLowerCase()));
     if (!hasStopWord && /^[A-Za-z.'-]+(\s+[A-Za-z.'-]+)*$/.test(cleaned)) {
@@ -272,7 +281,7 @@ export function extractFieldsFromText(
   const lower = text.toLowerCase().trim();
   let intent = "general_inquiry";
 
-  // Check for dynamic date in current turn (e.g. September 4, Tomorrow, Friday, etc.)
+  // Check for dynamic date in current turn
   const dynamicDate = parseDynamicDate(text);
   if (dynamicDate) {
     if (workflow.fields.some((f) => f.name === "preferred_date")) {
@@ -286,7 +295,18 @@ export function extractFieldsFromText(
     }
   }
 
-  // 1. CONTEXT-AWARE SLOT FILLING: Check what the assistant just asked for
+  // 1. Standalone Name Discovery (works anywhere, including first turn, e.g. "Lakshmi", "Priya", "Rahul")
+  if (workflow.fields.some((f) => f.name === "customer_name" || f.name === "patient_name")) {
+    const nameKey = workflow.fields.some((f) => f.name === "patient_name") ? "patient_name" : "customer_name";
+    if (!extracted[nameKey]) {
+      const candidateName = parseCleanName(text);
+      if (candidateName) {
+        extracted[nameKey] = candidateName;
+      }
+    }
+  }
+
+  // 2. CONTEXT-AWARE SLOT FILLING: Check what the assistant previously asked for
   const lastAskedField = identifyLastAskedField(conversationHistory, workflow);
 
   if (lastAskedField && (!extracted[lastAskedField.name] || extracted[lastAskedField.name] === "")) {
@@ -307,7 +327,7 @@ export function extractFieldsFromText(
       if (match) {
         extracted.flavor = match.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
       } else if (text.includes("ಚಾಕೊಲೇಟ್")) {
-        extracted.flavor = "Chocolate Truffle";
+        extracted.flavor = "Chocolate truffle";
       } else if (text.includes("ವೆನಿಲ್ಲಾ")) {
         extracted.flavor = "Vanilla Bean";
       } else if (text.includes("ರೆಡ್ ವೆಲ್ವೆಟ್")) {
@@ -408,13 +428,13 @@ export function extractFieldsFromText(
     }
   }
 
-  // 2. BROAD MULTI-ENTITY EXTRACTION (Extracts entities across languages)
+  // 3. BROAD MULTI-ENTITY EXTRACTION (Cross-field detection)
   const globalPhoneMatch = text.match(/(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/) || text.match(/\b\d{10}\b/);
   if (globalPhoneMatch && !extracted.phone_number) {
     extracted.phone_number = globalPhoneMatch[0];
   }
 
-  // Name extraction in Kannada, Hindi, English
+  // Explicit name patterns (e.g. "my name is Rahul")
   const knNameDirect = text.match(/(?:ನನ್ನ\s*ಹೆಸರು|ನಾನು|ಹೆಸರು)\s+([^\s,.]+)(?:\s+([^\s,.]+))?/u);
   if (knNameDirect && knNameDirect[1]) {
     const kName = `${knNameDirect[1]}${knNameDirect[2] ? " " + knNameDirect[2] : ""}`.trim();
@@ -463,40 +483,20 @@ export function extractFieldsFromText(
   if (workflow.industry === "clinic") {
     if (lower.includes("book") || lower.includes("appointment") || lower.includes("consult") || text.includes("बुकिंग") || text.includes("अपॉइंटमेंट") || text.includes("मिलना") || text.includes("ಬುಕ್") || text.includes("ಅಪಾಯಿಂಟ್ಮೆಂಟ್") || text.includes("ಭೇಟಿ")) {
       intent = "book_appointment";
-      extracted.appointment_intent = "Book New Appointment";
-    } else if (lower.includes("reschedule") || lower.includes("change time") || lower.includes("postpone") || text.includes("बदलना") || text.includes("ಮರುಹೊಂದಿಸಿ") || text.includes("ಸಮಯ ಬದಲಿಸಿ")) {
-      intent = "reschedule_appointment";
-      extracted.appointment_intent = "Reschedule Appointment";
-    } else if (lower.includes("cancel") || text.includes("रद्द") || text.includes("ರದ್ದು")) {
-      intent = "cancel_appointment";
-      extracted.appointment_intent = "Cancel Appointment";
     }
 
-    if (!extracted.doctor_speciality) {
-      if (lower.includes("sharma") || lower.includes("physician") || lower.includes("general") || text.includes("शर्मा") || text.includes("ಶರ್ಮಾ")) {
-        extracted.doctor_speciality = "General Physician (Dr. Sharma)";
-      } else if (lower.includes("kapoor") || lower.includes("dentist") || lower.includes("tooth") || lower.includes("teeth") || text.includes("कपूर") || text.includes("दांत") || text.includes("ಕಪೂರ್")) {
-        extracted.doctor_speciality = "Dentist (Dr. Kapoor)";
-      } else if (lower.includes("mehta") || lower.includes("cardio") || lower.includes("heart") || text.includes("मेहता") || text.includes("दिल") || text.includes("ಮೆಹ್ತಾ")) {
-        extracted.doctor_speciality = "Cardiologist (Dr. Mehta)";
-      } else if (lower.includes("patel") || lower.includes("skin") || lower.includes("derma") || text.includes("पटेल") || text.includes("त्वचा") || text.includes("ಪಟೇಲ್")) {
-        extracted.doctor_speciality = "Dermatologist (Dr. Patel)";
-      }
+    if (lower.includes("tooth") || lower.includes("teeth") || lower.includes("dentist") || text.includes("ಹಲ್ಲು")) {
+      extracted.doctor_speciality = "Dentist (Dr. Kapoor)";
+    } else if (lower.includes("sharma") || lower.includes("physician") || lower.includes("general") || text.includes("ಶರ್ಮಾ")) {
+      extracted.doctor_speciality = "General Physician (Dr. Sharma)";
+    } else if (lower.includes("mehta") || lower.includes("cardio") || lower.includes("heart") || text.includes("ಮೆಹ್ತಾ")) {
+      extracted.doctor_speciality = "Cardiologist (Dr. Mehta)";
     }
 
-    // Dynamic Date Assignment
-    if (dynamicDate) {
-      extracted.preferred_date = dynamicDate;
-    }
-
-    // Specific Time Detection (e.g. 12:34 AM, 3:00 PM, 1:30 AM, 4 PM, शाम 4 बजे, ಸಂಜೆ 4 ಗಂಟೆಗೆ)
-    const timeMatch = text.match(/(\d{1,2}:\d{2}\s*(?:am|pm)?)/i) || text.match(/(\d{1,2}\s*(?:am|pm))/i);
-    if (timeMatch) {
-      extracted.preferred_time = timeMatch[0].trim();
-    } else if (text.includes("शाम 4") || text.includes("4 बजे") || text.includes("ಸಂಜೆ 4") || text.includes("4 ಗಂಟೆ") || lower.includes("4 pm") || lower.includes("4:00 pm")) {
-      extracted.preferred_time = "4:00 PM";
-    } else if (text.includes("शाम 6") || text.includes("6 बजे") || text.includes("ಸಂಜೆ 6") || text.includes("6 ಗಂಟೆ") || lower.includes("6 pm") || lower.includes("6:00 pm")) {
-      extracted.preferred_time = "6:00 PM";
+    const timeRegex = /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm|baje|ಗಂಟೆ))\b/i;
+    const timeMatch = text.match(timeRegex);
+    if (timeMatch && !extracted.preferred_time) {
+      extracted.preferred_time = timeMatch[0].toUpperCase();
     } else if (text.includes("सुबह 10") || text.includes("10 बजे") || text.includes("10 am") || text.includes("10:00 am") || text.includes("ಬೆಳಿಗ್ಗೆ 10")) {
       extracted.preferred_time = "10:00 AM";
     } else if (text.includes("दोपहर 3") || text.includes("3 बजे") || text.includes("3 pm") || text.includes("3:00 pm") || text.includes("ಮಧ್ಯಾಹ್ನ 3")) {
@@ -509,17 +509,25 @@ export function extractFieldsFromText(
       else if (lower.includes("wedding") || lower.includes("shaadi") || text.includes("ಮದುವೆ")) extracted.cake_type = "Wedding Cake";
       else if (lower.includes("anniversary") || text.includes("ವಾರ್ಷಿಕೋತ್ಸವ")) extracted.cake_type = "Anniversary Cake";
       else if (lower.includes("cupcake") || lower.includes("pastry") || text.includes("ಪೇಸ್ಟ್ರಿ")) extracted.cake_type = "Pastries / Cupcakes";
+      else if (lower.includes("cake") || text.includes("ಕೇಕ್")) extracted.cake_type = "Birthday Cake";
     }
 
     if (!extracted.flavor) {
-      const flavors = ["chocolate truffle", "chocolate", "red velvet", "butterscotch", "vanilla bean", "vanilla", "black forest", "pineapple", "mango", "strawberry", "lotus biscoff"];
-      for (const f of flavors) {
-        if (lower.includes(f)) {
-          extracted.flavor = f.charAt(0).toUpperCase() + f.slice(1);
-          break;
-        }
+      if (lower.includes("chocolate truffle") || lower.includes("chocolate") || text.includes("ಚಾಕೊಲೇಟ್")) {
+        extracted.flavor = "Chocolate truffle";
+      } else if (lower.includes("red velvet") || text.includes("ರೆಡ್ ವೆಲ್ವೆಟ್")) {
+        extracted.flavor = "Red Velvet";
+      } else if (lower.includes("butterscotch")) {
+        extracted.flavor = "Butterscotch";
+      } else if (lower.includes("vanilla bean") || lower.includes("vanilla") || text.includes("ವೆನಿಲ್ಲಾ")) {
+        extracted.flavor = "Vanilla Bean";
+      } else if (lower.includes("black forest")) {
+        extracted.flavor = "Black Forest";
+      } else if (lower.includes("pineapple")) {
+        extracted.flavor = "Pineapple";
+      } else if (lower.includes("strawberry")) {
+        extracted.flavor = "Strawberry";
       }
-      if (text.includes("ಚಾಕೊಲೇಟ್")) extracted.flavor = "Chocolate Truffle";
     }
 
     if (!extracted.weight) {
@@ -554,15 +562,121 @@ export function extractFieldsFromText(
   return { extracted, intent };
 }
 
+// =========================================================================
+// GEMINI 1.5 FLASH / 2.0 API CALLER (Optional High-Intelligence LLM)
+// =========================================================================
+async function callGeminiOrchestrator(
+  apiKey: string,
+  business: Business,
+  workflow: Workflow,
+  conversationHistory: Message[],
+  latestUserMessage: string,
+  currentFields: Record<string, any>,
+  detectedLang: LanguageCode
+): Promise<{
+  reply?: string;
+  extractedFields?: Record<string, any>;
+  intent?: string;
+} | null> {
+  try {
+    const systemPrompt = `You are CallPilot AI, an ultra-intelligent, friendly voice phone assistant for "${business.name}" (${business.type}).
+Workflow Goal: ${workflow.name} - ${workflow.description}.
+Target Language: ${detectedLang === "kn" ? "Kannada (kn-IN)" : detectedLang === "hi" || detectedLang === "hinglish" ? "Hindi (hi-IN)" : "English (en-IN)"}.
+
+Current Extracted Fields: ${JSON.stringify(currentFields)}
+Workflow Required Fields: ${JSON.stringify(workflow.fields.map(f => ({ name: f.name, label: f.label, required: f.required })))}
+
+Instructions:
+1. Extract any new or updated fields from the caller's message (e.g. customer_name, flavor, weight, date, time, custom_message, etc.).
+2. Generate a warm, natural, dynamic, conversational response in the target language.
+3. NEVER repeat questions if the user has already provided the detail.
+4. If a name was just given (e.g. "Lakshmi"), warmly greet the person by name ("Nice to meet you, Lakshmi!") and ask for the next missing information (e.g. cake flavor/size or date).
+5. If cake flavor or details were just given (e.g. "chocolate cake"), acknowledge the choice warmly ("A chocolate cake sounds wonderful!") and ask for whatever is still missing.
+6. Keep spoken replies concise, natural, and friendly (1-2 short sentences max for voice clarity).
+
+Return ONLY valid JSON matching this schema:
+{
+  "extractedFields": { "field_name": "value" },
+  "reply": "Conversational assistant reply",
+  "intent": "Intent label"
+}`;
+
+    const promptMessages = [
+      ...conversationHistory.map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      })),
+      {
+        role: "user",
+        parts: [{ text: latestUserMessage }]
+      }
+    ];
+
+    const modelName = "gemini-2.0-flash";
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: promptMessages,
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const rawJson = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (rawJson) {
+        return JSON.parse(rawJson);
+      }
+    }
+  } catch (err) {
+    console.warn("Gemini API call warning, using smart local reasoning:", err);
+  }
+  return null;
+}
+
 // Main AI conversational processor
 export async function processConversationTurn(input: AIProcessInput): Promise<AIProcessOutput> {
   const { business, workflow, conversationHistory, latestUserMessage, extractedFields, callerPhone, apiKey } = input;
 
   const detectedLang = detectLanguage(latestUserMessage, input.language || workflow.language);
-  const { extracted: newFields, intent } = extractFieldsFromText(latestUserMessage, workflow, extractedFields, conversationHistory);
+  const { extracted: localExtracted, intent: localIntent } = extractFieldsFromText(latestUserMessage, workflow, extractedFields, conversationHistory);
 
+  let newFields: Record<string, any> = { ...localExtracted };
+  let intent = localIntent;
   const toolCallsExecuted: ToolCallRecord[] = [];
   let aiReply = "";
+
+  // Optional: Attempt Google Gemini reasoning if API key is provided
+  const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+  if (effectiveApiKey && effectiveApiKey.trim().length > 10 && !effectiveApiKey.includes("your-gemini-api-key")) {
+    const geminiResult = await callGeminiOrchestrator(
+      effectiveApiKey,
+      business,
+      workflow,
+      conversationHistory,
+      latestUserMessage,
+      newFields,
+      detectedLang
+    );
+    if (geminiResult) {
+      if (geminiResult.extractedFields) {
+        newFields = { ...newFields, ...geminiResult.extractedFields };
+      }
+      if (geminiResult.intent) {
+        intent = geminiResult.intent;
+      }
+      if (geminiResult.reply && geminiResult.reply.trim().length > 0) {
+        aiReply = geminiResult.reply.trim();
+      }
+    }
+  }
 
   // =========================================================================
   // 1. TOOL EXECUTION LAYER: Run Tools FIRST (Calendar Check, Booking, Tracking)
@@ -607,7 +721,6 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
         aiReply = `I have cancelled your appointment on our calendar as requested. Please let me know if you would like to book for another day.`;
       }
     } else if (alreadyBooked && isThankYouOrAck) {
-      // APPOINTMENT IS ALREADY CONFIRMED: Respond warmly without re-checking availability against its own event!
       if (detectedLang === "kn") {
         aiReply = `ನಿಮಗೆ ಸ್ವಾಗತ, ${patientName || ""}! ${prefDate} ರಂದು ${prefTime} ಗೆ ${newFields.doctor_speciality || "ಡಾ. ಶರ್ಮಾ"} ಅವರೊಂದಿಗೆ ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಕನ್ಫರ್ಮ್ ಆಗಿದೆ. ಶುಭ ದಿನ!`;
       } else if (detectedLang === "hi" || detectedLang === "hinglish") {
@@ -616,7 +729,6 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
         aiReply = `You're very welcome, ${patientName || "there"}! Your appointment with ${newFields.doctor_speciality || "Dr. Sharma"} on ${prefDate} at ${prefTime} is confirmed on Google Calendar. Have a wonderful day!`;
       }
     } else if (prefDate && prefTime && !alreadyBooked) {
-      // Step A: Check Google Calendar Availability
       const availRes = await toolRegistry.executeTool("calendar.checkAvailability", {
         date: prefDate,
         time: prefTime,
@@ -636,7 +748,6 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
       const isSlotAvailable = availRes.success && availRes.data?.available === true;
 
       if (!isSlotAvailable) {
-        // SLOT OCCUPIED: STRICTLY DO NOT EXECUTE createEvent!
         const alternatives = availRes.data?.suggestedSlots || ["1:30 AM", "2:00 PM", "4:30 PM"];
         const altText = alternatives.join(", ");
 
@@ -648,9 +759,7 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
           aiReply = `I checked our Google Calendar, but ${newFields.doctor_speciality || "Dr. Sharma"} is unavailable on ${prefDate} at ${prefTime} due to an existing booking. Would you like to schedule for one of our open slots instead, such as ${altText}?`;
         }
       } else {
-        // SLOT AVAILABLE:
         if (patientName) {
-          // Patient name is present -> Create event & confirm!
           const bookRes = await toolRegistry.executeTool("calendar.createEvent", {
             title: `Clinic Consultation: ${patientName} (${newFields.doctor_speciality || "Doctor"})`,
             attendeeName: patientName,
@@ -677,7 +786,6 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
             aiReply = `Excellent, ${patientName}! I checked our Google Calendar and confirmed your appointment with ${newFields.doctor_speciality || "Dr. Sharma"} for ${prefDate} at ${prefTime}. A Google Calendar invitation has been reserved.`;
           }
         } else {
-          // Slot is available, but need patient name to complete booking!
           if (detectedLang === "kn") {
             aiReply = `ಉತ್ತಮ ಸುದ್ದಿ! ನಾನು Google Calendar ಪರಿಶೀಲಿಸಿದ್ದೇನೆ ಮತ್ತು ${prefDate} ರಂದು ${prefTime} ಗೆ ಸ್ಲಾಟ್ ಲಭ್ಯವಿದೆ. ಬುಕಿಂಗ್ ಪೂರ್ಣಗೊಳಿಸಲು ದಯವಿಟ್ಟು ರೋಗಿಯ ಪೂರ್ಣ ಹೆಸರನ್ನು ತಿಳಿಸುವಿರಾ?`;
           } else if (detectedLang === "hi" || detectedLang === "hinglish") {
@@ -742,35 +850,89 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
   }
 
   // =========================================================================
-  // 2. CONVERSATIONAL & WORKFLOW STEPPING LAYER
+  // 2. DYNAMIC CONVERSATIONAL & WORKFLOW STEPPING LAYER
   // =========================================================================
   const evalResult = evaluateWorkflow(workflow, newFields);
 
   if (!aiReply) {
     if (evalResult.nextField) {
-      let q = evalResult.nextField.question;
-      if (detectedLang === "kn" && evalResult.nextField.questionKn) {
-        q = evalResult.nextField.questionKn;
-      } else if ((detectedLang === "hi" || detectedLang === "hinglish") && evalResult.nextField.questionHi) {
-        q = evalResult.nextField.questionHi;
-      }
+      const nextField = evalResult.nextField;
+      const callerName = newFields.customer_name || newFields.patient_name || "";
+      const justGotName = Boolean(callerName && (!extractedFields.customer_name && !extractedFields.patient_name));
+      const justGotFlavor = Boolean(newFields.flavor && !extractedFields.flavor);
+      const justGotWeight = Boolean(newFields.weight && !extractedFields.weight);
+      const justGotDate = Boolean(newFields.required_date && !extractedFields.required_date);
 
-      let ack = "";
-      if (newFields.customer_name && !extractedFields.customer_name) {
-        if (detectedLang === "kn") ack = `ನಮಸ್ಕಾರ ${newFields.customer_name}! `;
-        else if (detectedLang === "hi" || detectedLang === "hinglish") ack = `नमस्ते ${newFields.customer_name}! `;
-        else ack = `Nice to meet you, ${newFields.customer_name}! `;
+      if (detectedLang === "kn") {
+        if (justGotName) {
+          if (nextField.name === "flavor") {
+            aiReply = `ನಮಸ್ಕಾರ ${callerName}! ನಿಮಗೆ ಯಾವ ಫ್ಲೇವರ್ ಕೇಕ್ ಬೇಕು (ಉದಾ: ಚಾಕೊಲೇಟ್ ಟ್ರಫಲ್, ರೆಡ್ ವೆಲ್ವೆಟ್)?`;
+          } else {
+            aiReply = `ನಮಸ್ಕಾರ ${callerName}! ${nextField.questionKn || nextField.question}`;
+          }
+        } else if (justGotFlavor) {
+          if (!callerName) {
+            aiReply = `${newFields.flavor} ಕೇಕ್ ಅದ್ಭುತ ಆಯ್ಕೆ! ಆರ್ಡರ್ ದಾಖಲಿಸಲು ದಯವಿಟ್ಟು ನಿಮ್ಮ ಹೆಸರು ತಿಳಿಸುವಿರಾ?`;
+          } else {
+            aiReply = `ಉತ್ತಮ! ${newFields.flavor} ಕೇಕ್ ನೋಟ್ ಮಾಡಿಕೊಂಡಿದ್ದೇನೆ. ಎಷ್ಟು ಕೆಜಿ ಅಥವಾ ಎಷ್ಟು ಜನರಿಗೆ ಬೇಕು?`;
+          }
+        } else {
+          aiReply = `${nextField.questionKn || nextField.question}`;
+        }
+      } else if (detectedLang === "hi" || detectedLang === "hinglish") {
+        if (justGotName) {
+          if (nextField.name === "flavor") {
+            aiReply = `नमस्ते ${callerName}! आप कौन सा फ्लेवर पसंद करेंगे (जैसे चॉकलेट, रेड वेलवेट या वैनिला)?`;
+          } else {
+            aiReply = `नमस्ते ${callerName}! ${nextField.questionHi || nextField.question}`;
+          }
+        } else if (justGotFlavor) {
+          if (!callerName) {
+            aiReply = `${newFields.flavor} केक बहुत बढ़िया पसंद है! बुकिंग के लिए कृपया अपना नाम बताएं?`;
+          } else {
+            aiReply = `बढ़िया! ${newFields.flavor} केक नोट कर लिया है। आपको कितने किलो का चाहिए?`;
+          }
+        } else {
+          aiReply = `${nextField.questionHi || nextField.question}`;
+        }
       } else {
-        const ackEn = ["Got it! ", "Understood. ", "Perfect. ", "Noted! ", "Great. "];
-        const ackHi = ["जी बिल्कुल! ", "समझ गया। ", "बढ़िया! ", "नोट कर लिया। "];
-        const ackKn = ["ಖಂಡಿತ! ", "ಸರಿ! ", "ಗಮನಿಸಲಾಗಿದೆ! ", "ಉತ್ತಮ! "];
-        
-        if (detectedLang === "kn") ack = ackKn[Math.floor(Math.random() * ackKn.length)];
-        else if (detectedLang === "hi" || detectedLang === "hinglish") ack = ackHi[Math.floor(Math.random() * ackHi.length)];
-        else ack = ackEn[Math.floor(Math.random() * ackEn.length)];
+        // English Conversational Flow
+        if (justGotName) {
+          if (nextField.name === "flavor") {
+            aiReply = `Nice to meet you, ${callerName}! What flavor or occasion are you celebrating for your cake order?`;
+          } else if (nextField.name === "cake_type") {
+            aiReply = `Nice to meet you, ${callerName}! What kind of cake or occasion can we prepare for you?`;
+          } else {
+            aiReply = `Nice to meet you, ${callerName}! ${nextField.question}`;
+          }
+        } else if (justGotFlavor) {
+          if (!callerName) {
+            aiReply = `A ${newFields.flavor} cake sounds wonderful! Who am I speaking with so I can put this order under your name?`;
+          } else if (nextField.name === "weight") {
+            aiReply = `Great choice, ${callerName}! A ${newFields.flavor} cake. What size or weight do you need (e.g. 1 kg, 2 kg)?`;
+          } else {
+            aiReply = `Noted, ${newFields.flavor}! ${nextField.question}`;
+          }
+        } else if (justGotWeight) {
+          if (!callerName) {
+            aiReply = `Got it, ${newFields.weight}! May I please have your name for the order?`;
+          } else if (nextField.name === "required_date") {
+            aiReply = `Got it, ${newFields.weight}! When would you like this ready for pickup or delivery?`;
+          } else {
+            aiReply = `Got it, ${newFields.weight}! ${nextField.question}`;
+          }
+        } else if (justGotDate) {
+          if (!callerName) {
+            aiReply = `Perfect, ${newFields.required_date}! Who should I place this booking for?`;
+          } else {
+            aiReply = `Perfect, ${newFields.required_date}! ${nextField.question}`;
+          }
+        } else {
+          const acks = ["Got it! ", "Understood. ", "Noted! ", "Perfect. "];
+          const ack = acks[Math.floor(Math.random() * acks.length)];
+          aiReply = `${ack}${nextField.question}`;
+        }
       }
-
-      aiReply = `${ack}${q}`;
     } else {
       const isFarewell = ["end", "bye", "goodbye", "hang up", "thank you", "thanks", "done", "ok", "okay", "ಮುಗಿಸಿ", "ಧನ್ಯವಾದಗಳು", "ಸಾಕು"].some(
         (word) => latestUserMessage.toLowerCase().includes(word)

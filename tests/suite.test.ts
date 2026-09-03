@@ -225,6 +225,49 @@ async function runTests() {
     assert(turn3.reply.toLowerCase().includes("welcome") || turn3.reply.toLowerCase().includes("confirmed"), "Turn 3 acknowledges confirmed appointment warmly");
   }
 
+  // 9. Multi-Turn Bakery Flow: Standalone Name + Dynamic Follow-up (No Repetition)
+  console.log("\n9. Testing Multi-Turn Dynamic Bakery Flow (Standalone Name & Item Intake):");
+  {
+    const { processConversationTurn } = await import("../src/lib/ai/orchestrator");
+    const biz = storageRepo.getBusiness("biz_cake_haven")!;
+
+    // Turn 1: Caller introduces with standalone name "Lakshmi"
+    const turn1 = await processConversationTurn({
+      business: biz,
+      workflow: CAKE_SHOP_WORKFLOW,
+      conversationHistory: [
+        { id: "init", conversationId: "c1", role: "assistant", content: CAKE_SHOP_WORKFLOW.greeting, timestamp: "" }
+      ],
+      latestUserMessage: "Lakshmi",
+      extractedFields: {},
+      callerPhone: "+1 (555) 349-8800",
+    });
+
+    assert(turn1.updatedExtractedFields.customer_name === "Lakshmi", "Turn 1 extracts standalone name 'Lakshmi'");
+    assert(turn1.reply.includes("Lakshmi"), "Turn 1 addresses Lakshmi by name warmly");
+    assert(!turn1.reply.includes("May I have your name"), "Turn 1 DOES NOT repeat name question to Lakshmi");
+
+    // Turn 2: Caller says "chocolate cake"
+    const turn2MsgHistory = [
+      { id: "init", conversationId: "c1", role: "assistant" as const, content: CAKE_SHOP_WORKFLOW.greeting, timestamp: "" },
+      { id: "m1", conversationId: "c1", role: "user" as const, content: "Lakshmi", timestamp: "" },
+      { id: "m2", conversationId: "c1", role: "assistant" as const, content: turn1.reply, timestamp: "" },
+    ];
+
+    const turn2 = await processConversationTurn({
+      business: biz,
+      workflow: CAKE_SHOP_WORKFLOW,
+      conversationHistory: turn2MsgHistory,
+      latestUserMessage: "chocolate cake",
+      extractedFields: turn1.updatedExtractedFields,
+      callerPhone: "+1 (555) 349-8800",
+    });
+
+    assert(turn2.updatedExtractedFields.flavor.toLowerCase().includes("chocolate"), "Turn 2 extracts chocolate flavor");
+    assert(!turn2.reply.includes("May I have your name"), "Turn 2 DOES NOT ask for name again");
+    assert(turn2.reply.includes("weight") || turn2.reply.includes("size") || turn2.reply.includes("kg"), "Turn 2 dynamically asks for weight/size");
+  }
+
   console.log("\n==========================================");
   console.log(`Results: ${passed} Passed, ${failed} Failed`);
   console.log("==========================================\n");
