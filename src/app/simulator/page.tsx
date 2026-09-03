@@ -34,6 +34,8 @@ import {
   PhoneOff,
   Trash2,
   CornerDownLeft,
+  Headphones,
+  Zap,
 } from "lucide-react";
 import { storageRepo, AppState } from "@/lib/store/storage";
 import { PREBUILT_TEMPLATES } from "@/lib/workflow/templates";
@@ -66,16 +68,16 @@ export default function SimulatorPage() {
   const [callDuration, setCallDuration] = useState(0);
   const [isCallEnded, setIsCallEnded] = useState(false);
   const [isLiveCallActive, setIsLiveCallActive] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(false);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
-  const [autoListenAfterSpeech, setAutoListenAfterSpeech] = useState(false);
 
   // =========================================================================
-  // CHATGPT-STYLE VOICE DICTATION & EDIT WORKFLOW
+  // CONTINUOUS HANDS-FREE VOICE CONVERSATION STATE
   // =========================================================================
+  const [voiceModeType, setVoiceModeType] = useState<"hands_free_call" | "dictate">("hands_free_call");
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [voiceModeType, setVoiceModeType] = useState<"dictate" | "live_call">("dictate");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceProviderStatus, setVoiceProviderStatus] = useState<{ configured: boolean; provider: string } | null>(null);
   const [voiceCreditExhausted, setVoiceCreditExhausted] = useState(false);
@@ -91,6 +93,17 @@ export default function SimulatorPage() {
   const recTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingSessionRef = useRef<RecordingSession | null>(null);
   const isSpeakingRef = useRef<boolean>(false);
+  const isLiveCallActiveRef = useRef<boolean>(false);
+  const voiceModeTypeRef = useRef<"hands_free_call" | "dictate">("hands_free_call");
+
+  // Keep refs in sync with state for real-time callbacks
+  useEffect(() => {
+    isLiveCallActiveRef.current = isLiveCallActive;
+  }, [isLiveCallActive]);
+
+  useEffect(() => {
+    voiceModeTypeRef.current = voiceModeType;
+  }, [voiceModeType]);
 
   useEffect(() => {
     const unsub = storageRepo.subscribe((s) => setAppState({ ...s }));
@@ -158,6 +171,7 @@ export default function SimulatorPage() {
     setIsComplete(false);
     setIsCallEnded(false);
     setIsLiveCallActive(false);
+    setIsMicMuted(false);
     setLastUpdatedField(null);
     setSavedSuccess(false);
     setCallDuration(0);
@@ -174,7 +188,7 @@ export default function SimulatorPage() {
         behavior: "smooth",
       });
     }
-  }, [messages, isLoading, isTranscribing, isSpeakingRef.current]);
+  }, [messages, isLoading, isTranscribing, liveSpokenText]);
 
   const formatCallDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -183,9 +197,69 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // CHATGPT-STYLE AUDIO CAPTURE & LIVE SPEECH TRANSCRIBING
+  // CONTINUOUS HANDS-FREE VOICE CAPTURE ENGINE
   // =========================================================================
-  const startRecording = async () => {
+  const startContinuousCapture = async () => {
+    try {
+      if (recordingSessionRef.current) {
+        recordingSessionRef.current.cancel();
+        recordingSessionRef.current = null;
+      }
+
+      await voiceEngine.unlockAudio();
+      setVoiceErrorMessage(null);
+
+      const session = await startAudioCapture({
+        language: selectedLanguage,
+        continuous: true,
+        silenceTimeoutMs: 1300,
+        onLiveTranscript: (text) => {
+          setLiveSpokenText(text);
+        },
+        onSpeechStart: () => {
+          if (!isSpeakingRef.current) {
+            setVoiceState("listening");
+            setIsRecording(true);
+          }
+        },
+        onSpeechEnd: async (finalTranscript) => {
+          // Automatic Turn End via Silence Detection (Zero Clicks Required!)
+          console.log("[Continuous Call] Auto-submitting speech turn:", finalTranscript);
+          if (finalTranscript.trim()) {
+            setLiveSpokenText("");
+            setIsRecording(false);
+            setVoiceState("processing");
+            recordingSessionRef.current?.pause();
+            await handleSendMessage(finalTranscript.trim());
+          }
+        },
+        onBargeIn: () => {
+          // User started talking while AI was speaking!
+          if (isSpeakingRef.current) {
+            console.log("[Continuous Call] Barge-in detected, interrupting AI speech");
+            handleInterruptSpeaking();
+            recordingSessionRef.current?.resume();
+            setVoiceState("listening");
+          }
+        },
+        onVolumeChange: setLiveVolume,
+        onError: (err) => {
+          console.warn("Continuous microphone capture warning:", err);
+          setVoiceErrorMessage(err);
+        },
+      });
+
+      recordingSessionRef.current = session;
+      return session;
+    } catch (err: any) {
+      console.error("Failed to start continuous capture:", err);
+      setVoiceErrorMessage(err.message || "Microphone access error");
+      return null;
+    }
+  };
+
+  // Dictate mode recording trigger (ChatGPT manual record & edit)
+  const startDictateRecording = async () => {
     try {
       if (voiceEngine.getIsSpeaking()) {
         voiceEngine.stopSpeaking();
@@ -200,6 +274,7 @@ export default function SimulatorPage() {
 
       const session = await startAudioCapture({
         language: selectedLanguage,
+        continuous: false,
         onLiveTranscript: (text) => {
           setLiveSpokenText(text);
         },
@@ -225,7 +300,7 @@ export default function SimulatorPage() {
     }
   };
 
-  // User clicks Done / Finish Speaking -> Populates text box and opens Edit Review!
+  // User clicks Done in manual Dictate mode
   const stopAndTranscribe = async () => {
     if (!isRecording || !recordingSessionRef.current) return;
 
@@ -250,11 +325,9 @@ export default function SimulatorPage() {
         setInputText(finalTranscript);
         setHasTranscribedSpeech(true);
 
-        if (voiceModeType === "live_call") {
-          // Hands-free continuous call mode auto-sends
+        if (voiceModeType === "hands_free_call") {
           await handleSendMessage(finalTranscript);
         } else {
-          // ChatGPT-Style Dictate Mode: Keeps text in input box with focus for instant editing!
           setTimeout(() => {
             inputRef.current?.focus();
             inputRef.current?.select();
@@ -286,16 +359,34 @@ export default function SimulatorPage() {
     setLiveSpokenText("");
   };
 
+  // Toggle Mute
+  const handleToggleMute = () => {
+    const nextMute = !isMicMuted;
+    setIsMicMuted(nextMute);
+    recordingSessionRef.current?.setMuted(nextMute);
+    voiceEngine.playMuteChime(nextMute);
+  };
+
   // =========================================================================
-  // DUAL-ENGINE AI SPEECH PLAYBACK (Sarvam Bulbul v3 + Web Speech Fallback)
+  // DUAL-ENGINE AI SPEECH PLAYBACK & AUTO-TURN RESUME
   // =========================================================================
-  const speakAIResponse = async (textToSpeak: string, responseId?: string, autoListenAfter = false) => {
-    if (!audioEnabled || voiceCreditExhausted) return;
+  const speakAIResponse = async (textToSpeak: string, responseId?: string, isCallLoop = true) => {
+    if (!audioEnabled || voiceCreditExhausted) {
+      // If audio is muted, return immediately to listening in live call mode
+      if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call") {
+        setVoiceState("listening");
+        recordingSessionRef.current?.resume();
+      }
+      return;
+    }
 
     try {
       isSpeakingRef.current = true;
       setVoiceState("speaking");
       if (responseId) setPlayingMessageId(responseId);
+
+      // Pause continuous listener while AI is vocalizing
+      recordingSessionRef.current?.pause();
 
       await voiceEngine.speak({
         text: textToSpeak,
@@ -309,39 +400,58 @@ export default function SimulatorPage() {
         },
         onEnd: () => {
           isSpeakingRef.current = false;
-          setVoiceState("idle");
           setPlayingMessageId(null);
 
-          // In hands-free live call mode, automatically listen after agent finishes speaking
-          if (voiceModeType === "live_call" && autoListenAfter && !isCallEnded && autoListenAfterSpeech) {
+          // CONTINUOUS HANDS-FREE LOOP: Automatically open mic and listen for caller's next reply!
+          if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
+            console.log("[Continuous Call] AI finished speaking, auto-resuming listening...");
+            setVoiceState("listening");
+            setIsRecording(true);
             setTimeout(() => {
-              if (!isSpeakingRef.current && !isRecording) {
-                startRecording();
+              if (isLiveCallActiveRef.current && !isSpeakingRef.current) {
+                recordingSessionRef.current?.resume();
               }
-            }, 400);
+            }, 100);
+          } else {
+            setVoiceState("idle");
           }
         },
         onError: (err) => {
           console.warn("Audio vocalization notice:", err);
           isSpeakingRef.current = false;
-          setVoiceState("idle");
           setPlayingMessageId(null);
+          if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
+            setVoiceState("listening");
+            recordingSessionRef.current?.resume();
+          } else {
+            setVoiceState("idle");
+          }
         },
       });
     } catch (err) {
       console.warn("speakAIResponse catch:", err);
       isSpeakingRef.current = false;
-      setVoiceState("idle");
       setPlayingMessageId(null);
+      if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
+        setVoiceState("listening");
+        recordingSessionRef.current?.resume();
+      } else {
+        setVoiceState("idle");
+      }
     }
   };
 
-  // Interrupt / Stop speech playback
+  // Interrupt assistant playback
   const handleInterruptSpeaking = () => {
     voiceEngine.stopSpeaking();
     isSpeakingRef.current = false;
-    setVoiceState("idle");
     setPlayingMessageId(null);
+    if (isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
+      setVoiceState("listening");
+      recordingSessionRef.current?.resume();
+    } else {
+      setVoiceState("idle");
+    }
   };
 
   // Play / Replay specific message
@@ -354,22 +464,28 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // VOICE-FIRST TELEPHONY CONTROLS (Call In / Out)
+  // VOICE-FIRST TELEPHONY CONTROLS (Hands-Free Live Call)
   // =========================================================================
   const handleStartVoiceCall = async () => {
     try {
       await voiceEngine.unlockAudio();
       setIsLiveCallActive(true);
       setIsCallEnded(false);
-      setVoiceModeType("dictate"); // ChatGPT Dictate & Edit by default for maximum user control!
+      setIsMicMuted(false);
+      setVoiceModeType("hands_free_call");
+      setVoiceState("speaking");
 
       // Play ringing and connect chime
       await voiceEngine.playRingTone(1.2);
       await voiceEngine.playConnectChime();
 
-      // Speak initial greeting automatically!
+      // Initialize warm continuous recording session
+      await startContinuousCapture();
+      recordingSessionRef.current?.pause(); // Keep paused while greeting is vocalized
+
+      // Speak initial greeting automatically -> When finished, auto-triggers listening!
       const initialGreetingMsg = messages[0]?.content || activeWorkflow.greeting;
-      await speakAIResponse(initialGreetingMsg, messages[0]?.id, false);
+      await speakAIResponse(initialGreetingMsg, messages[0]?.id, true);
     } catch (e) {
       console.warn("Start voice call error:", e);
     }
@@ -383,6 +499,7 @@ export default function SimulatorPage() {
     setIsLiveCallActive(false);
     setIsCallEnded(true);
     setVoiceState("idle");
+    setLiveSpokenText("");
   };
 
   const handleTestAudio = async () => {
@@ -475,10 +592,6 @@ export default function SimulatorPage() {
         (w) => lowerText.includes(w) || text.includes(w)
       );
 
-      if (isFarewell) {
-        handleEndVoiceCall();
-      }
-
       if (result.toolCallsExecuted && result.toolCallsExecuted.length > 0) {
         setToolCalls((prev) => [...prev, ...result.toolCallsExecuted]);
       }
@@ -496,9 +609,23 @@ export default function SimulatorPage() {
 
       setMessages((prev) => [...prev, aiMsg]);
 
-      // Trigger Voice Playback with Dual-Engine Voice Synthesizer
+      // If user indicated farewell, vocalize farewell then hang up
+      if (isFarewell) {
+        if (audioEnabled) {
+          await speakAIResponse(result.reply, responseId, false);
+        }
+        setTimeout(() => {
+          handleEndVoiceCall();
+        }, 1200);
+        return;
+      }
+
+      // Vocalize AI Response and automatically resume continuous listening onEnd
       if (audioEnabled) {
-        speakAIResponse(result.reply, responseId, voiceModeType === "live_call");
+        await speakAIResponse(result.reply, responseId, isLiveCallActive);
+      } else if (isLiveCallActive && voiceModeType === "hands_free_call") {
+        setVoiceState("listening");
+        recordingSessionRef.current?.resume();
       }
     } catch (err: any) {
       console.error("Simulation error:", err);
@@ -514,6 +641,10 @@ export default function SimulatorPage() {
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMsg]);
+      if (isLiveCallActive && voiceModeType === "hands_free_call") {
+        setVoiceState("listening");
+        recordingSessionRef.current?.resume();
+      }
     } finally {
       setIsLoading(false);
     }
@@ -544,6 +675,7 @@ export default function SimulatorPage() {
     setIsComplete(false);
     setIsCallEnded(false);
     setIsLiveCallActive(false);
+    setIsMicMuted(false);
     setVoiceState("idle");
     setLastUpdatedField(null);
     setSavedSuccess(false);
@@ -566,7 +698,7 @@ export default function SimulatorPage() {
       status: "new",
       urgency,
       intent: currentIntent,
-      summary: `Voice-first session for ${activeBiz.name}. Captured ${Object.keys(extractedFields).length}/${activeWorkflow.fields.length} fields: ${JSON.stringify(extractedFields)}.`,
+      summary: `Continuous Voice Session for ${activeBiz.name}. Captured ${Object.keys(extractedFields).length}/${activeWorkflow.fields.length} fields: ${JSON.stringify(extractedFields)}.`,
       extractedFields,
       language: selectedLanguage,
       toolCalls,
@@ -650,17 +782,17 @@ export default function SimulatorPage() {
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-5 space-y-4 sm:space-y-6 pb-16">
       {/* =========================================================================
-          TOP COMMAND BAR & MULTILINGUAL VOICE STATUS
+          TOP COMMAND BAR & MULTILINGUAL VOICE CONTROLS
       ========================================================================== */}
       <div className="glass-panel-luxury rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4 border border-slate-200/90 shadow-md">
         {/* Industry Selector */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60 flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
-              ChatGPT-Style Voice Dictation & Edit
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60 flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+              Continuous Hands-Free Voice Agent
             </span>
-            <span className="text-[10px] font-mono text-slate-400">Speak &bull; Transcribe &bull; Edit &bull; Send</span>
+            <span className="text-[10px] font-mono text-slate-400">Zero Clicks Needed • Live Turn-Taking</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5 pt-1">
@@ -731,6 +863,18 @@ export default function SimulatorPage() {
           {/* Voice Mode Selector */}
           <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
             <button
+              onClick={() => setVoiceModeType("hands_free_call")}
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                voiceModeType === "hands_free_call"
+                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs scale-[1.02]"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+              title="Continuous conversation (Zero button clicks during call)"
+            >
+              <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
+              <span>Hands-Free Call</span>
+            </button>
+            <button
               onClick={() => setVoiceModeType("dictate")}
               className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 voiceModeType === "dictate"
@@ -740,19 +884,7 @@ export default function SimulatorPage() {
               title="Speak -> Transcribe live -> Edit text -> Send"
             >
               <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
-              <span>Dictate & Edit (ChatGPT)</span>
-            </button>
-            <button
-              onClick={() => setVoiceModeType("live_call")}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                voiceModeType === "live_call"
-                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xs scale-[1.02]"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-              title="Continuous live call with auto-turn taking"
-            >
-              <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
-              <span>Live Call</span>
+              <span>Dictate & Edit</span>
             </button>
           </div>
 
@@ -838,60 +970,203 @@ export default function SimulatorPage() {
       )}
 
       {/* =========================================================================
-          VOICE-FIRST CALL BANNER / TELEPHONY CONTROLS
+          CONTINUOUS VOICE CALL HERO BANNER / IN-CALL COCKPIT
       ========================================================================== */}
-      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 border border-indigo-900/50">
-        <div className="flex items-center gap-3.5 sm:gap-4 w-full md:w-auto">
-          <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30 shrink-0">
-            <PhoneCall className={`h-6 w-6 ${isLiveCallActive ? "animate-bounce" : ""}`} />
-            {isLiveCallActive && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-slate-900" />
-              </span>
+      <div className={`rounded-2xl sm:rounded-3xl p-4 sm:p-6 text-white shadow-2xl transition-all duration-500 border ${
+        isLiveCallActive
+          ? "bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 border-indigo-500/50 ring-2 ring-indigo-500/20"
+          : "bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 border-indigo-900/50"
+      }`}>
+        <div className="flex flex-col md:flex-row items-center justify-between gap-5">
+          {/* Left Avatar & Live State */}
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            {/* Dynamic Interactive Voice Orb */}
+            <div className="relative flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-2xl sm:rounded-3xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-teal-400 text-white shadow-xl shadow-indigo-500/30 shrink-0">
+              <PhoneCall className={`h-7 w-7 ${isLiveCallActive ? "animate-pulse" : ""}`} />
+              
+              {isLiveCallActive && (
+                <>
+                  <span className={`absolute -inset-1 rounded-3xl opacity-75 animate-ping ${
+                    voiceState === "speaking"
+                      ? "bg-purple-500"
+                      : voiceState === "listening"
+                      ? "bg-emerald-500"
+                      : "bg-indigo-500"
+                  }`} />
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950" />
+                  </span>
+                </>
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-xl font-black tracking-tight text-white">
+                  {isLiveCallActive ? "Continuous Voice Call In Progress" : "Autonomous Voice AI Telephony"}
+                </h2>
+                <Badge
+                  variant={isLiveCallActive ? "neon-emerald" : "secondary"}
+                  dot={isLiveCallActive}
+                  className="text-[10px] font-mono uppercase tracking-wide"
+                >
+                  {isLiveCallActive ? `Live (${formatCallDuration(callDuration)})` : "Standby Ready"}
+                </Badge>
+              </div>
+              
+              <div className="flex items-center gap-2 mt-1 text-xs text-indigo-200/90 font-medium">
+                {isLiveCallActive ? (
+                  <span className="flex items-center gap-1.5 text-emerald-300 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                    Hands-Free Continuous Mode Active &bull; Speak naturally without pressing any buttons
+                  </span>
+                ) : (
+                  <span>
+                    Click &lsquo;Start Continuous Voice Call&rsquo; to test natural back-and-forth phone conversation in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Right In-Call Telephony Action Bar */}
+          <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto justify-end">
+            {!isLiveCallActive ? (
+              <button
+                onClick={handleStartVoiceCall}
+                className="w-full md:w-auto px-6 py-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-500/30 hover:scale-[1.03] active:scale-[0.98] transition-all cursor-pointer ring-2 ring-emerald-400/40"
+              >
+                <PhoneCall className="h-4 sm:h-5 w-4 sm:w-5 animate-bounce" />
+                <span>Start Continuous Voice Call</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 w-full md:w-auto flex-wrap justify-end">
+                {/* Mute Microphone Button */}
+                <button
+                  onClick={handleToggleMute}
+                  className={`px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                    isMicMuted
+                      ? "bg-amber-500/90 hover:bg-amber-500 text-white ring-2 ring-amber-400/50"
+                      : "bg-white/10 hover:bg-white/20 text-slate-200 border border-white/15"
+                  }`}
+                  title={isMicMuted ? "Unmute Microphone" : "Mute Microphone"}
+                >
+                  {isMicMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  <span>{isMicMuted ? "Muted" : "Mute"}</span>
+                </button>
+
+                {/* Interrupt AI Button */}
+                {voiceState === "speaking" && (
+                  <button
+                    onClick={handleInterruptSpeaking}
+                    className="px-3.5 py-2.5 rounded-xl bg-purple-600/90 hover:bg-purple-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer animate-pulse"
+                    title="Interrupt assistant speech"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                    <span>Interrupt AI</span>
+                  </button>
+                )}
+
+                {/* End Call Button */}
+                <button
+                  onClick={handleEndVoiceCall}
+                  className="px-4 sm:px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs flex items-center gap-2 transition-all shadow-lg shadow-rose-600/30 hover:scale-[1.02] cursor-pointer"
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  <span>End Call</span>
+                </button>
+              </div>
             )}
           </div>
+        </div>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-black tracking-tight">
-                {isLiveCallActive ? "Live Voice AI Call Connected" : "Autonomous Voice AI Agent"}
-              </h2>
-              <Badge
-                variant={isLiveCallActive ? "neon-emerald" : "secondary"}
-                dot={isLiveCallActive}
-                className="text-[10px]"
-              >
-                {isLiveCallActive ? "Call in Progress" : "Ready"}
-              </Badge>
+        {/* Live In-Call Status Radar & Dynamic Subtitles Bar */}
+        {isLiveCallActive && (
+          <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className={`px-2.5 py-1 rounded-lg font-mono font-bold text-[11px] uppercase tracking-wider flex items-center gap-1.5 ${
+                voiceState === "speaking"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                  : voiceState === "listening"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                  : voiceState === "processing"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                  : "bg-slate-800 text-slate-300"
+              }`}>
+                {voiceState === "speaking" ? (
+                  <>
+                    <Volume2 className="h-3.5 w-3.5 text-purple-400 animate-pulse" />
+                    <span>🔊 Agent Speaking...</span>
+                  </>
+                ) : voiceState === "listening" ? (
+                  <>
+                    <Mic className="h-3.5 w-3.5 text-emerald-400 animate-bounce" />
+                    <span>🎙️ Listening to You (Speak naturally)</span>
+                  </>
+                ) : voiceState === "processing" ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 text-amber-400 animate-spin" />
+                    <span>⚡ AI Thinking & Checking Tools...</span>
+                  </>
+                ) : (
+                  <span>Ready</span>
+                )}
+              </span>
+
+              {/* Dynamic Sound Wave */}
+              <div className="flex items-center gap-1 h-5 px-2 rounded-lg bg-black/30 border border-white/10">
+                <div className={`w-1 rounded-full transition-all duration-75 ${
+                  voiceState === "speaking"
+                    ? "bg-purple-400 animate-wave-1"
+                    : liveVolume > 10
+                    ? "bg-emerald-400 h-4"
+                    : "bg-slate-600 h-1.5"
+                }`} />
+                <div className={`w-1 rounded-full transition-all duration-75 ${
+                  voiceState === "speaking"
+                    ? "bg-purple-400 animate-wave-2"
+                    : liveVolume > 20
+                    ? "bg-emerald-400 h-5"
+                    : "bg-slate-600 h-2"
+                }`} />
+                <div className={`w-1 rounded-full transition-all duration-75 ${
+                  voiceState === "speaking"
+                    ? "bg-indigo-300 animate-wave-3"
+                    : liveVolume > 30
+                    ? "bg-emerald-300 h-6"
+                    : "bg-slate-600 h-2.5"
+                }`} />
+                <div className={`w-1 rounded-full transition-all duration-75 ${
+                  voiceState === "speaking"
+                    ? "bg-indigo-300 animate-wave-4"
+                    : liveVolume > 20
+                    ? "bg-emerald-400 h-5"
+                    : "bg-slate-600 h-2"
+                }`} />
+                <div className={`w-1 rounded-full transition-all duration-75 ${
+                  voiceState === "speaking"
+                    ? "bg-purple-400 animate-wave-5"
+                    : liveVolume > 10
+                    ? "bg-emerald-400 h-4"
+                    : "bg-slate-600 h-1.5"
+                }`} />
+              </div>
             </div>
-            <p className="text-xs text-indigo-200/80 mt-0.5">
-              Click &lsquo;Speak 🎙️&rsquo; to dictate your message, transcribe speech live to text, and edit before sending in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.
-            </p>
+
+            {/* Live Real-Time Subtitle Ticker */}
+            {liveSpokenText ? (
+              <div className="truncate text-emerald-300 font-medium max-w-lg bg-emerald-950/60 px-3 py-1 rounded-lg border border-emerald-500/30">
+                <span className="text-emerald-400 font-bold mr-1">Hearing:</span>
+                &ldquo;{liveSpokenText}&rdquo;
+              </div>
+            ) : (
+              <div className="text-indigo-200/70 text-[11px] font-mono">
+                Auto-silence detection commits speech seamlessly &bull; No button press needed
+              </div>
+            )}
           </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto justify-end">
-          {!isLiveCallActive ? (
-            <button
-              onClick={handleStartVoiceCall}
-              className="w-full md:w-auto px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
-            >
-              <PhoneCall className="h-4 w-4" />
-              <span>Start Live Voice Call</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <button
-                onClick={handleEndVoiceCall}
-                className="px-4 py-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
-              >
-                <PhoneOff className="h-4 w-4" />
-                <span>End Call</span>
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {/* =========================================================================
@@ -1038,7 +1313,7 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 2: CHATGPT-STYLE DICTATE, LIVE TRANSCRIBE & EDIT BAR
+            COLUMN 2: LIVE CONVERSATION STREAM & DUAL-MODE VOICE INPUT BAR
         ========================================================================== */}
         <div className="lg:col-span-8 xl:col-span-6 space-y-3.5 sm:space-y-4">
           <div className="glass-card-luxury rounded-2xl sm:rounded-3xl flex flex-col h-[540px] sm:h-[600px] lg:h-[640px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
@@ -1047,7 +1322,7 @@ export default function SimulatorPage() {
               <div className="flex items-center gap-2.5 sm:gap-3">
                 {/* Caller Avatar */}
                 <div className="relative flex h-8 sm:h-10 w-8 sm:w-10 items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/30 shrink-0">
-                  <PhoneCall className="h-4 sm:h-5 w-4 sm:w-5" />
+                  <Bot className="h-4 sm:h-5 w-4 sm:w-5" />
                   {voiceState === "speaking" && (
                     <>
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-2xl bg-indigo-400 opacity-60" />
@@ -1070,34 +1345,36 @@ export default function SimulatorPage() {
                           ? "secondary"
                           : voiceState === "speaking"
                           ? "neon-emerald"
-                          : isRecording
+                          : voiceState === "listening"
                           ? "neon-rose"
-                          : isTranscribing
+                          : voiceState === "processing"
                           ? "neon-amber"
                           : isLiveCallActive
                           ? "neon-indigo"
                           : "secondary"
                       }
                       dot={isLiveCallActive && !isCallEnded}
-                      className="text-[9px] sm:text-[10px] py-0.5 px-1.5"
+                      className="text-[9px] sm:text-[10px] py-0.5 px-1.5 font-bold"
                     >
                       {isCallEnded
-                        ? "✓ Ended"
+                        ? "✓ Call Ended"
                         : voiceState === "speaking"
                         ? "🔊 Agent Speaking"
-                        : isRecording
-                        ? "🎙️ Transcribing Voice..."
-                        : isTranscribing
-                        ? "⚡ Processing"
+                        : voiceState === "listening"
+                        ? "🎙️ Listening to You"
+                        : voiceState === "processing"
+                        ? "⚡ Processing Turn"
                         : isLiveCallActive
-                        ? "Live Call Active"
-                        : "Ready to Speak"}
+                        ? "Live Hands-Free Active"
+                        : "Ready"}
                     </Badge>
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1 sm:gap-1.5 mt-0.5">
                     <span>+1 (555) 349-8800</span>
                     <span>•</span>
                     <span className="font-mono text-slate-600 font-bold">{formatCallDuration(callDuration)}</span>
+                    <span>•</span>
+                    <span className="text-emerald-700 font-semibold font-mono">Continuous Mode</span>
                   </p>
                 </div>
               </div>
@@ -1122,9 +1399,8 @@ export default function SimulatorPage() {
                     <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-3" : liveVolume > 30 ? "h-5 sm:h-7" : "h-2.5"}`} />
                     <div className={`w-1 bg-purple-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-4" : liveVolume > 20 ? "h-4 sm:h-5" : "h-2"}`} />
                     <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-5" : liveVolume > 15 ? "h-4 sm:h-6" : "h-2"}`} />
-                    <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-6" : liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
                     <span className="ml-1 text-[9px] sm:text-[10px] font-extrabold text-indigo-700 tracking-wide uppercase hidden sm:inline">
-                      {voiceState === "speaking" ? "Speaking" : isRecording ? "Listening" : "Voice Active"}
+                      {voiceState === "speaking" ? "Speaking" : voiceState === "listening" ? "Listening" : "Voice Active"}
                     </span>
                   </div>
                 )}
@@ -1220,9 +1496,22 @@ export default function SimulatorPage() {
                 );
               })}
 
+              {/* Real-Time Live Spoken Speech Bubble (Live User Transcript) */}
+              {isLiveCallActive && liveSpokenText && (
+                <div className="flex flex-col items-end animate-in fade-in slide-in-from-bottom-2 duration-150">
+                  <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                    <span>Caller (Speaking live...)</span>
+                  </div>
+                  <div className="rounded-2xl sm:rounded-3xl rounded-tr-sm bg-indigo-50 border border-indigo-300 px-4 py-2.5 text-xs sm:text-sm text-indigo-950 font-medium italic shadow-sm">
+                    &ldquo;{liveSpokenText}&rdquo;
+                  </div>
+                </div>
+              )}
+
               {/* Reasoning & Tool execution animation state */}
               {isLoading && (
-                <div className="flex flex-col items-start">
+                <div className="flex flex-col items-start animate-in fade-in duration-150">
                   <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px] font-extrabold uppercase tracking-wider text-indigo-600">
                     <Bot className="h-3 w-3 text-indigo-600" />
                     <span>CallPilot AI</span>
@@ -1231,9 +1520,9 @@ export default function SimulatorPage() {
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-2 rounded-full bg-indigo-600 animate-bounce" />
                       <div className="h-2 w-2 rounded-full bg-purple-600 animate-bounce [animation-delay:0.2s]" />
-                      <div className="h-2 w-2 rounded-full bg-pink-500 animate-bounce [animation-delay:0.4s]" />
+                      <div className="h-2 w-2 rounded-full bg-teal-500 animate-bounce [animation-delay:0.4s]" />
                       <span className="text-xs font-semibold text-slate-600 ml-1">
-                        Synthesizing audio & executing tools...
+                        Reasoning, extracting entities & executing tools...
                       </span>
                     </div>
                   </div>
@@ -1260,45 +1549,73 @@ export default function SimulatorPage() {
             </div>
 
             {/* =========================================================================
-                CHATGPT-STYLE DICTATE & EDIT INPUT BAR
+                INPUT BAR: CONTINUOUS LIVE CALL HUD / MANUAL CHATGPT DICTATE
             ========================================================================== */}
             <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/95 space-y-2">
-              {/* Review & Edit Banner (Appears after speech transcription so user can review) */}
-              {hasTranscribedSpeech && !isRecording && inputText.trim() && (
-                <div className="flex items-center justify-between p-2 rounded-xl bg-indigo-50/90 border border-indigo-200 text-indigo-950 text-xs animate-in fade-in slide-in-from-bottom-2 duration-200">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Edit3 className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-                    <span className="font-bold text-[11px] text-indigo-900 truncate">
-                      Speech Transcribed — Edit text in box below or click Send:
+              {isLiveCallActive && voiceModeType === "hands_free_call" ? (
+                /* Hands-Free Live Call In-Progress Controller */
+                <div className="flex flex-col gap-2 p-3 sm:p-3.5 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-3 w-3">
+                        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                          voiceState === "speaking" ? "bg-purple-400" : "bg-emerald-400"
+                        }`} />
+                        <span className={`relative inline-flex rounded-full h-3 w-3 ${
+                          voiceState === "speaking" ? "bg-purple-500" : "bg-emerald-500"
+                        }`} />
+                      </span>
+                      <span className="font-extrabold text-xs text-white">
+                        {voiceState === "speaking"
+                          ? "Assistant Vocalizing Response..."
+                          : voiceState === "listening"
+                          ? "Microphone Active — Speak Freely"
+                          : voiceState === "processing"
+                          ? "Processing Turn..."
+                          : "Hands-Free Voice Active"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleToggleMute}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                          isMicMuted
+                            ? "bg-amber-500 text-white"
+                            : "bg-white/10 hover:bg-white/20 text-slate-200"
+                        }`}
+                      >
+                        {isMicMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                        <span>{isMicMuted ? "Unmute" : "Mute"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleEndVoiceCall}
+                        className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <PhoneOff className="h-3.5 w-3.5" />
+                        <span>Hang Up</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-indigo-200/90 flex items-center justify-between">
+                    <span>
+                      {isMicMuted
+                        ? "Microphone is muted. Click 'Unmute' to speak."
+                        : liveSpokenText
+                        ? `Live Speech: "${liveSpokenText}"`
+                        : "Continuous conversational mode is active. Speak into your mic whenever you want to reply."}
+                    </span>
+                    <span className="font-mono text-emerald-400 text-[10px] hidden sm:inline font-bold">
+                      ✓ Auto VAD Active
                     </span>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={startRecording}
-                      className="px-2 py-0.5 rounded-lg bg-white border border-indigo-200 text-indigo-700 text-[10px] font-bold hover:bg-indigo-100 flex items-center gap-1 cursor-pointer"
-                      title="Speak more into this message"
-                    >
-                      <Mic className="h-3 w-3 text-indigo-600" />
-                      <span>Speak More</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInputText("");
-                        setHasTranscribedSpeech(false);
-                      }}
-                      className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-indigo-100 cursor-pointer"
-                      title="Clear text"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
                 </div>
-              )}
-
-              {isRecording ? (
-                /* Active Recording State (Waveform + Live Spoken Words + Done / Cancel) */
+              ) : isRecording ? (
+                /* Manual Dictate Recording State */
                 <div className="flex flex-col gap-2 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-xl animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 pl-1.5">
@@ -1311,18 +1628,7 @@ export default function SimulatorPage() {
                       </span>
                     </div>
 
-                    {/* Dynamic Soundwave Visualizer Bars */}
-                    <div className="flex items-center gap-1 h-5 sm:h-6">
-                      <div className={`w-1 bg-rose-400 rounded-full transition-all duration-75 ${liveVolume > 10 ? "h-4 sm:h-5" : "h-1.5"}`} />
-                      <div className={`w-1 bg-indigo-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-6" : "h-2"}`} />
-                      <div className={`w-1 bg-purple-300 rounded-full transition-all duration-75 ${liveVolume > 30 ? "h-6 sm:h-7" : "h-2.5"}`} />
-                      <div className={`w-1 bg-rose-300 rounded-full transition-all duration-75 ${liveVolume > 20 ? "h-5 sm:h-5" : "h-2"}`} />
-                      <div className={`w-1 bg-indigo-400 rounded-full transition-all duration-75 ${liveVolume > 15 ? "h-5 sm:h-6" : "h-2"}`} />
-                      <div className={`w-1 bg-purple-400 rounded-full transition-all duration-75 ${liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
-                    </div>
-
                     <div className="flex items-center gap-1.5 sm:gap-2">
-                      {/* Cancel Recording */}
                       <button
                         type="button"
                         onClick={cancelRecording}
@@ -1332,7 +1638,6 @@ export default function SimulatorPage() {
                         <X className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
                       </button>
 
-                      {/* Done / Finish Speaking -> Put in text box for editing! */}
                       <button
                         type="button"
                         onClick={stopAndTranscribe}
@@ -1345,17 +1650,13 @@ export default function SimulatorPage() {
                     </div>
                   </div>
 
-                  {/* Recording Status Box */}
                   <div className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs font-medium text-indigo-100 min-h-[32px] flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-rose-400 animate-ping" />
-                      <span>
-                        Recording in {selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Speak your message now.
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="h-2 w-2 rounded-full bg-rose-400 animate-ping shrink-0" />
+                      <span className="truncate">
+                        {liveSpokenText ? `Hearing: "${liveSpokenText}"` : `Recording in ${selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}... Speak your message.`}
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-300 font-mono hidden sm:inline">
-                      Click &lsquo;Done Speaking&rsquo; to transcribe
-                    </span>
                   </div>
                 </div>
               ) : isTranscribing ? (
@@ -1365,7 +1666,7 @@ export default function SimulatorPage() {
                   <span>Processing speech ({selectedLanguage === "kn" ? "kn-IN" : selectedLanguage === "hi" ? "hi-IN" : "en-IN"})...</span>
                 </div>
               ) : (
-                /* Standard ChatGPT Input Form with Dedicated Mic Button */
+                /* Standard Input Form with Mic Button & Fast Typing */
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -1376,16 +1677,12 @@ export default function SimulatorPage() {
                   {/* Microphone Voice Trigger */}
                   <button
                     type="button"
-                    onClick={startRecording}
+                    onClick={startDictateRecording}
                     disabled={isLoading || voiceState === "speaking"}
-                    className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border transition-all cursor-pointer shrink-0 shadow-2xs group flex items-center gap-1.5 font-bold text-xs ${
-                      hasTranscribedSpeech
-                        ? "bg-slate-100 hover:bg-indigo-50 border-slate-300 text-slate-700 hover:text-indigo-700"
-                        : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20"
-                    }`}
-                    title="Click to speak (ChatGPT Voice Dictation)"
+                    className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border transition-all cursor-pointer shrink-0 shadow-2xs group flex items-center gap-1.5 font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20"
+                    title="Click to speak (Dictate Mode)"
                   >
-                    <Mic className={`h-4 w-4 ${hasTranscribedSpeech ? "text-indigo-600" : "text-white"} group-hover:scale-110 transition-transform`} />
+                    <Mic className="h-4 w-4 text-white group-hover:scale-110 transition-transform" />
                     <span className="hidden sm:inline">Speak</span>
                   </button>
 
@@ -1403,11 +1700,7 @@ export default function SimulatorPage() {
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
                       disabled={isLoading}
-                      className={`w-full rounded-xl sm:rounded-2xl bg-slate-50/90 border px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium ${
-                        hasTranscribedSpeech
-                          ? "border-indigo-400 ring-2 ring-indigo-300/30 bg-white"
-                          : "border-slate-300/90"
-                      }`}
+                      className="w-full rounded-xl sm:rounded-2xl bg-slate-50/90 border border-slate-300/90 px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-600 transition-all font-medium"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <span className="text-[10px] font-mono text-slate-400 hidden sm:inline">Enter ↵</span>

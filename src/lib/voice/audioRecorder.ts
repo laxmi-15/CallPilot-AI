@@ -1,19 +1,33 @@
 /**
- * CallPilot AI - Robust Multilingual Audio Recorder & Live Speech-to-Text
- * Dual-Mode Transcription:
- * 1. Real-time Live Web Speech Recognition (instant on-screen live words as you speak)
- * 2. 16kHz PCM WAV Encoder -> Sarvam Saaras v3 STT (/api/voice/stt)
+ * CallPilot AI - Robust Multilingual Audio Recorder & Hands-Free Continuous Voice Engine
+ * Features:
+ * 1. Continuous Live Hands-Free Conversational Voice Loop (Zero button clicks during calls)
+ * 2. Voice Activity Detection (VAD) & Automatic Silence Turn-Ending (auto-commits speech)
+ * 3. Barge-In Interruption Detection (user speaks while AI is talking)
+ * 4. Dual STT: Real-time Web Speech Streaming + 16kHz PCM WAV Sarvam Saaras v3
+ * 5. Warm mic state management: instant turn reset without microphone reconnect delays
  */
 
 export interface RecordingSession {
   stop: () => Promise<{ transcript: string; wavBlob: Blob | null }>;
   cancel: () => void;
+  resetTurn: () => void;
+  pause: () => void;
+  resume: () => void;
+  isPaused: () => boolean;
+  getLiveTranscript: () => string;
+  setMuted: (muted: boolean) => void;
 }
 
 export interface StartRecordingOptions {
   language: "en" | "hi" | "kn" | "hinglish";
+  continuous?: boolean;
+  silenceTimeoutMs?: number;
   onLiveTranscript?: (text: string, isFinal: boolean) => void;
+  onSpeechStart?: () => void;
+  onSpeechEnd?: (transcript: string) => void;
   onVolumeChange?: (volume: number) => void;
+  onBargeIn?: () => void;
   onError?: (error: string) => void;
 }
 
@@ -68,46 +82,67 @@ function writeString(view: DataView, offset: number, str: string) {
 }
 
 /**
- * Resample Float32Array audio buffer to target sample rate (16000Hz)
- */
-function resampleTo16k(audioBuffer: AudioBuffer): Float32Array {
-  const sourceRate = audioBuffer.sampleRate;
-  const targetRate = 16000;
-  const channelData = audioBuffer.getChannelData(0);
-
-  if (sourceRate === targetRate) {
-    return channelData;
-  }
-
-  const ratio = sourceRate / targetRate;
-  const newLength = Math.round(channelData.length / ratio);
-  const result = new Float32Array(newLength);
-
-  for (let i = 0; i < newLength; i++) {
-    const origIndex = i * ratio;
-    const indexFloor = Math.floor(origIndex);
-    const indexCeil = Math.min(channelData.length - 1, indexFloor + 1);
-    const fraction = origIndex - indexFloor;
-    result[i] = channelData[indexFloor] * (1 - fraction) + channelData[indexCeil] * fraction;
-  }
-
-  return result;
-}
-
-/**
- * Start high-accuracy audio capture with live browser speech recognition and Sarvam PCM WAV backup.
+ * Start high-accuracy audio capture with live browser speech recognition,
+ * continuous hands-free silence detection (VAD), and Sarvam PCM WAV backup.
  */
 export async function startAudioCapture(options: StartRecordingOptions): Promise<RecordingSession> {
-  const { language, onLiveTranscript, onVolumeChange, onError } = options;
+  const {
+    language,
+    continuous = false,
+    silenceTimeoutMs = 1400,
+    onLiveTranscript,
+    onSpeechStart,
+    onSpeechEnd,
+    onVolumeChange,
+    onBargeIn,
+    onError,
+  } = options;
 
   let stream: MediaStream | null = null;
   let audioContext: AudioContext | null = null;
-  let mediaRecorder: MediaRecorder | null = null;
   let recognition: any = null;
+  let isMuted = false;
+  let isPaused = false;
+  let isSessionActive = true;
+  let hasSpokenThisTurn = false;
   let liveTranscript = "";
   let pcmChunks: Float32Array[] = [];
   let scriptProcessor: ScriptProcessorNode | null = null;
   let animFrameId: number | null = null;
+  let silenceTimer: NodeJS.Timeout | null = null;
+  let lastSpeechTimestamp = 0;
+
+  const targetLang =
+    language === "kn"
+      ? "kn-IN"
+      : language === "hi" || language === "hinglish"
+      ? "hi-IN"
+      : "en-IN";
+
+  const clearSilenceTimer = () => {
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+  };
+
+  const scheduleSilenceCheck = (delayMs = silenceTimeoutMs) => {
+    if (!continuous || !isSessionActive || isPaused || isMuted) return;
+
+    clearSilenceTimer();
+    silenceTimer = setTimeout(() => {
+      if (!isSessionActive || isPaused || isMuted) return;
+
+      const currentText = liveTranscript.trim();
+      if (currentText.length > 0 && hasSpokenThisTurn) {
+        console.log("[VAD] Silence detected after speech, auto-committing turn:", currentText);
+        const transcriptToCommit = currentText;
+        liveTranscript = "";
+        hasSpokenThisTurn = false;
+        onSpeechEnd?.(transcriptToCommit);
+      }
+    }, delayMs);
+  };
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -122,49 +157,102 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
     audioContext = new AudioCtxClass();
     const source = audioContext.createMediaStreamSource(stream);
 
-    // 1. Live Volume Visualizer Analyser
+    // 1. Live Volume Visualizer & Voice Activity Analyser
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 64;
+    analyser.smoothingTimeConstant = 0.4;
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let consecutiveVoiceFrames = 0;
+
     const updateVolume = () => {
-      if (analyser && onVolumeChange) {
+      if (!isSessionActive) return;
+
+      if (analyser && !isMuted) {
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
         const avg = sum / dataArray.length;
-        onVolumeChange(Math.min(100, Math.round((avg / 128) * 100)));
+        const volumeScore = Math.min(100, Math.round((avg / 128) * 100));
+
+        if (!isPaused) {
+          onVolumeChange?.(volumeScore);
+
+          // Audio energy threshold check for speech activity
+          if (volumeScore > 12) {
+            consecutiveVoiceFrames++;
+            if (consecutiveVoiceFrames >= 3) {
+              lastSpeechTimestamp = Date.now();
+              if (!hasSpokenThisTurn && liveTranscript.length > 0) {
+                hasSpokenThisTurn = true;
+                onSpeechStart?.();
+              }
+              clearSilenceTimer();
+            }
+          } else {
+            consecutiveVoiceFrames = 0;
+            if (hasSpokenThisTurn && liveTranscript.trim().length > 0 && !silenceTimer) {
+              scheduleSilenceCheck(silenceTimeoutMs);
+            }
+          }
+        } else {
+          // In paused mode (e.g. while AI is speaking), detect if user is barging in
+          if (volumeScore > 28) {
+            onBargeIn?.();
+          }
+          onVolumeChange?.(0);
+        }
+      } else {
+        onVolumeChange?.(0);
       }
+
       animFrameId = requestAnimationFrame(updateVolume);
     };
     updateVolume();
 
-    // 2. Capture raw PCM samples via ScriptProcessor for 100% compliant 16kHz WAV
+    // 2. Capture raw PCM samples via ScriptProcessor for 16kHz WAV
     scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
     scriptProcessor.onaudioprocess = (e) => {
+      if (!isSessionActive || isPaused || isMuted) return;
       const inputData = e.inputBuffer.getChannelData(0);
       pcmChunks.push(new Float32Array(inputData));
     };
     source.connect(scriptProcessor);
     scriptProcessor.connect(audioContext.destination);
 
-    // 3. Initialize Live Web Speech Recognition (Real-time live streaming text)
-    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognitionClass) {
+    // 3. Initialize Live Web Speech Recognition
+    const SpeechRecognitionClass =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    const initSpeechRecognition = () => {
+      if (!SpeechRecognitionClass || !isSessionActive) return;
+
       try {
+        if (recognition) {
+          try {
+            recognition.abort();
+          } catch (e) {}
+        }
+
         recognition = new SpeechRecognitionClass();
         recognition.continuous = true;
         recognition.interimResults = true;
-
-        let targetLang = "en-IN";
-        if (language === "kn") targetLang = "kn-IN";
-        else if (language === "hi" || language === "hinglish") targetLang = "hi-IN";
-        else targetLang = "en-IN";
-
         recognition.lang = targetLang;
 
+        recognition.onstart = () => {
+          console.log("[STT] Web Speech Recognition started for lang:", targetLang);
+        };
+
         recognition.onresult = (event: any) => {
+          if (!isSessionActive || isMuted) return;
+
+          // If speech is detected while paused, trigger barge in
+          if (isPaused) {
+            onBargeIn?.();
+            return;
+          }
+
           let interimStr = "";
           let finalStr = "";
 
@@ -176,61 +264,143 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
             }
           }
 
-          const currentText = (finalStr || interimStr).trim();
-          if (currentText) {
-            liveTranscript = currentText;
-            onLiveTranscript?.(currentText, Boolean(finalStr));
+          const combined = (finalStr || interimStr).trim();
+          if (combined) {
+            liveTranscript = combined;
+            lastSpeechTimestamp = Date.now();
+
+            if (!hasSpokenThisTurn) {
+              hasSpokenThisTurn = true;
+              onSpeechStart?.();
+            }
+
+            onLiveTranscript?.(combined, Boolean(finalStr));
+
+            // Reset silence timeout on new spoken words
+            if (continuous) {
+              // If final phrase received, trigger auto-commit slightly faster
+              const delay = Boolean(finalStr) ? Math.min(1000, silenceTimeoutMs) : silenceTimeoutMs;
+              scheduleSilenceCheck(delay);
+            }
           }
         };
 
         recognition.onerror = (event: any) => {
-          console.warn("Live recognition note:", event.error);
+          if (event.error === "no-speech") {
+            // Normal during pauses
+            return;
+          }
+          console.warn("[STT] Live recognition error:", event.error);
+        };
+
+        recognition.onend = () => {
+          // If session is still active and continuous, auto-restart speech recognition
+          if (isSessionActive && !isPaused && continuous) {
+            try {
+              recognition.start();
+            } catch (e) {
+              // Ignore restart error if already started
+            }
+          }
         };
 
         recognition.start();
       } catch (recErr) {
-        console.warn("Web SpeechRecognition init note:", recErr);
+        console.warn("SpeechRecognition initialization note:", recErr);
       }
-    }
+    };
+
+    initSpeechRecognition();
   } catch (err: any) {
     console.error("Audio capture start error:", err);
     onError?.(
       err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
-        ? "Microphone permission denied. Please allow microphone access."
-        : "Failed to access microphone."
+        ? "Microphone permission denied. Please allow microphone access in your browser."
+        : "Failed to access microphone audio stream."
     );
     throw err;
   }
 
   const cleanup = () => {
-    if (animFrameId) cancelAnimationFrame(animFrameId);
+    isSessionActive = false;
+    clearSilenceTimer();
+
+    if (animFrameId) {
+      cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+    }
+
     if (recognition) {
       try {
         recognition.stop();
       } catch (e) {}
+      recognition = null;
     }
+
     if (scriptProcessor) {
       try {
         scriptProcessor.disconnect();
       } catch (e) {}
+      scriptProcessor = null;
     }
+
     if (stream) {
       stream.getTracks().forEach((t) => t.stop());
+      stream = null;
     }
+
     if (audioContext && audioContext.state !== "closed") {
       try {
         audioContext.close();
       } catch (e) {}
+      audioContext = null;
     }
   };
 
   return {
     cancel: cleanup,
+
+    getLiveTranscript: () => liveTranscript,
+
+    isPaused: () => isPaused,
+
+    pause: () => {
+      isPaused = true;
+      clearSilenceTimer();
+    },
+
+    resume: () => {
+      isPaused = false;
+      liveTranscript = "";
+      hasSpokenThisTurn = false;
+      pcmChunks = [];
+      clearSilenceTimer();
+      if (recognition && isSessionActive) {
+        try {
+          recognition.start();
+        } catch (e) {}
+      }
+    },
+
+    resetTurn: () => {
+      liveTranscript = "";
+      hasSpokenThisTurn = false;
+      pcmChunks = [];
+      clearSilenceTimer();
+    },
+
+    setMuted: (muted: boolean) => {
+      isMuted = muted;
+      if (muted) {
+        clearSilenceTimer();
+        onVolumeChange?.(0);
+      }
+    },
+
     stop: async () => {
-      // Collect all PCM samples
       cleanup();
 
-      // Total samples
+      // Merge PCM chunks
       let totalLength = 0;
       for (const chunk of pcmChunks) totalLength += chunk.length;
       const mergedSamples = new Float32Array(totalLength);
@@ -242,7 +412,7 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
       // Resample to 16kHz
       const targetRate = 16000;
-      const sourceRate = 44100; // standard default AudioContext rate
+      const sourceRate = 44100;
       const ratio = sourceRate / targetRate;
       const resampledLength = Math.round(mergedSamples.length / ratio);
       const resampledSamples = new Float32Array(resampledLength);
@@ -253,31 +423,32 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
       const wavBlob = encodePcmWav(resampledSamples, 16000);
 
-      // 1. Post-speech transcription via Sarvam Saaras v3 STT with standard 16kHz WAV
+      // Post-speech transcription via Sarvam Saaras v3 STT
       try {
-        const formData = new FormData();
-        formData.append("file", wavBlob, "speech.wav");
-        formData.append("language", language);
+        if (wavBlob && wavBlob.size > 2000) {
+          const formData = new FormData();
+          formData.append("file", wavBlob, "speech.wav");
+          formData.append("language", language);
 
-        const res = await fetch("/api/voice/stt", {
-          method: "POST",
-          body: formData,
-        });
+          const res = await fetch("/api/voice/stt", {
+            method: "POST",
+            body: formData,
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.transcript && data.transcript.trim().length > 0) {
-            return {
-              transcript: data.transcript.trim(),
-              wavBlob,
-            };
+          if (res.ok) {
+            const data = await res.json();
+            if (data.transcript && data.transcript.trim().length > 0) {
+              return {
+                transcript: data.transcript.trim(),
+                wavBlob,
+              };
+            }
           }
         }
       } catch (sarvamErr) {
         console.warn("Sarvam Saaras STT call note:", sarvamErr);
       }
 
-      // 2. Resilient fallback to browser SpeechRecognition transcript
       return {
         transcript: liveTranscript.trim(),
         wavBlob,
