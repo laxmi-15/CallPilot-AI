@@ -245,7 +245,7 @@ export default function SimulatorPage() {
       const session = await startAudioCapture({
         language: selectedLanguageRef.current,
         continuous: true,
-        silenceTimeoutMs: 1300,
+        silenceTimeoutMs: 1800,
         onLiveTranscript: (text) => {
           setLiveSpokenText(text);
         },
@@ -257,21 +257,13 @@ export default function SimulatorPage() {
         },
         onSpeechEnd: async (finalTranscript) => {
           const trimmed = finalTranscript.trim();
-          if (!trimmed || isLoadingRef.current) return;
-          console.log("[Continuous Call] Auto-submitting speech turn:", trimmed);
+          if (!trimmed || isLoadingRef.current || isSpeakingRef.current) return;
+          console.log("[Continuous Call] User completed response, submitting turn:", trimmed);
           setLiveSpokenText("");
           setIsRecording(false);
           setVoiceState("processing");
           recordingSessionRef.current?.pause();
           await handleSendMessageRef.current(trimmed);
-        },
-        onBargeIn: () => {
-          if (isSpeakingRef.current) {
-            console.log("[Continuous Call] Barge-in detected, interrupting AI speech");
-            handleInterruptSpeaking();
-            recordingSessionRef.current?.resume();
-            setVoiceState("listening");
-          }
         },
         onVolumeChange: setLiveVolume,
         onError: (err) => {
@@ -434,14 +426,14 @@ export default function SimulatorPage() {
 
           // CONTINUOUS HANDS-FREE LOOP: Automatically open mic and listen for caller's next reply!
           if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
-            console.log("[Continuous Call] AI finished speaking, auto-resuming listening...");
-            setVoiceState("listening");
-            setIsRecording(true);
+            console.log("[Continuous Call] AI finished speaking sentence completely, waiting for caller reply...");
             setTimeout(() => {
               if (isLiveCallActiveRef.current && !isSpeakingRef.current) {
+                setVoiceState("listening");
+                setIsRecording(true);
                 recordingSessionRef.current?.resume();
               }
-            }, 100);
+            }, 250);
           } else {
             setVoiceState("idle");
           }
@@ -451,8 +443,12 @@ export default function SimulatorPage() {
           isSpeakingRef.current = false;
           setPlayingMessageId(null);
           if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call" && !isCallEnded) {
-            setVoiceState("listening");
-            recordingSessionRef.current?.resume();
+            setTimeout(() => {
+              if (isLiveCallActiveRef.current && !isSpeakingRef.current) {
+                setVoiceState("listening");
+                recordingSessionRef.current?.resume();
+              }
+            }, 250);
           } else {
             setVoiceState("idle");
           }

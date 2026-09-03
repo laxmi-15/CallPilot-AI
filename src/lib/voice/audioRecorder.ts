@@ -3,7 +3,7 @@
  * Features:
  * 1. Continuous Live Hands-Free Conversational Voice Loop (Zero button clicks during calls)
  * 2. Voice Activity Detection (VAD) & Automatic Silence Turn-Ending (auto-commits speech)
- * 3. Barge-In Interruption Detection (user speaks while AI is talking)
+ * 3. Echo & Noise Isolation: Prevents ambient noise or speaker playback from interrupting AI speech
  * 4. Dual STT: Real-time Web Speech Streaming + 16kHz PCM WAV Sarvam Saaras v3
  * 5. Warm mic state management: instant turn reset without microphone reconnect delays
  */
@@ -89,12 +89,11 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
   const {
     language,
     continuous = false,
-    silenceTimeoutMs = 1400,
+    silenceTimeoutMs = 1700,
     onLiveTranscript,
     onSpeechStart,
     onSpeechEnd,
     onVolumeChange,
-    onBargeIn,
     onError,
   } = options;
 
@@ -110,7 +109,6 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
   let scriptProcessor: ScriptProcessorNode | null = null;
   let animFrameId: number | null = null;
   let silenceTimer: NodeJS.Timeout | null = null;
-  let lastSpeechTimestamp = 0;
 
   const targetLang =
     language === "kn"
@@ -134,8 +132,9 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
       if (!isSessionActive || isPaused || isMuted) return;
 
       const currentText = liveTranscript.trim();
-      if (currentText.length > 0 && hasSpokenThisTurn) {
-        console.log("[VAD] Silence detected after speech, auto-committing turn:", currentText);
+      // Ensure there is meaningful speech (more than 1 character)
+      if (currentText.length >= 2 && hasSpokenThisTurn) {
+        console.log("[VAD] User finished speaking, committing turn:", currentText);
         const transcriptToCommit = currentText;
         liveTranscript = "";
         hasSpokenThisTurn = false;
@@ -179,11 +178,10 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
         if (!isPaused) {
           onVolumeChange?.(volumeScore);
 
-          // Audio energy threshold check for speech activity
-          if (volumeScore > 12) {
+          // Audio energy threshold check for speech activity (filtered against ambient room hum)
+          if (volumeScore > 14) {
             consecutiveVoiceFrames++;
             if (consecutiveVoiceFrames >= 3) {
-              lastSpeechTimestamp = Date.now();
               if (!hasSpokenThisTurn && liveTranscript.length > 0) {
                 hasSpokenThisTurn = true;
                 onSpeechStart?.();
@@ -192,15 +190,12 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
             }
           } else {
             consecutiveVoiceFrames = 0;
-            if (hasSpokenThisTurn && liveTranscript.trim().length > 0 && !silenceTimer) {
+            if (hasSpokenThisTurn && liveTranscript.trim().length >= 2 && !silenceTimer) {
               scheduleSilenceCheck(silenceTimeoutMs);
             }
           }
         } else {
-          // In paused mode (e.g. while AI is speaking), detect if user is barging in
-          if (volumeScore > 28) {
-            onBargeIn?.();
-          }
+          // While paused (AI speaking), zero out volume display and do not trigger auto-interrupts
           onVolumeChange?.(0);
         }
       } else {
@@ -245,11 +240,8 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
         };
 
         recognition.onresult = (event: any) => {
-          if (!isSessionActive || isMuted) return;
-
-          // If speech is detected while paused, trigger barge in
-          if (isPaused) {
-            onBargeIn?.();
+          // STRICTLY IGNORE speech recognition events while AI is vocalizing or microphone is paused/muted
+          if (!isSessionActive || isPaused || isMuted) {
             return;
           }
 
@@ -265,9 +257,8 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
           }
 
           const combined = (finalStr || interimStr).trim();
-          if (combined) {
+          if (combined && !isPaused && !isMuted) {
             liveTranscript = combined;
-            lastSpeechTimestamp = Date.now();
 
             if (!hasSpokenThisTurn) {
               hasSpokenThisTurn = true;
@@ -278,8 +269,7 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
             // Reset silence timeout on new spoken words
             if (continuous) {
-              // If final phrase received, trigger auto-commit slightly faster
-              const delay = Boolean(finalStr) ? Math.min(1000, silenceTimeoutMs) : silenceTimeoutMs;
+              const delay = Boolean(finalStr) ? Math.min(1200, silenceTimeoutMs) : silenceTimeoutMs;
               scheduleSilenceCheck(delay);
             }
           }
@@ -287,20 +277,16 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
         recognition.onerror = (event: any) => {
           if (event.error === "no-speech") {
-            // Normal during pauses
             return;
           }
           console.warn("[STT] Live recognition error:", event.error);
         };
 
         recognition.onend = () => {
-          // If session is still active and continuous, auto-restart speech recognition
           if (isSessionActive && !isPaused && continuous) {
             try {
               recognition.start();
-            } catch (e) {
-              // Ignore restart error if already started
-            }
+            } catch (e) {}
           }
         };
 
@@ -366,7 +352,14 @@ export async function startAudioCapture(options: StartRecordingOptions): Promise
 
     pause: () => {
       isPaused = true;
+      liveTranscript = "";
+      hasSpokenThisTurn = false;
       clearSilenceTimer();
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch (e) {}
+      }
     },
 
     resume: () => {
