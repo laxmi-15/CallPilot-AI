@@ -72,7 +72,7 @@ export default function SimulatorPage() {
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   // =========================================================================
-  // CONTINUOUS HANDS-FREE VOICE CONVERSATION STATE
+  // CONTINUOUS HANDS-FREE VOICE CONVERSATION STATE & REFS
   // =========================================================================
   const [voiceModeType, setVoiceModeType] = useState<"hands_free_call" | "dictate">("hands_free_call");
   const [isRecording, setIsRecording] = useState(false);
@@ -96,7 +96,15 @@ export default function SimulatorPage() {
   const isLiveCallActiveRef = useRef<boolean>(false);
   const voiceModeTypeRef = useRef<"hands_free_call" | "dictate">("hands_free_call");
 
-  // Keep refs in sync with state for real-time callbacks
+  // Synchronized state refs to avoid stale closures during continuous speech callbacks
+  const messagesRef = useRef<Message[]>([]);
+  const extractedFieldsRef = useRef<Record<string, any>>({});
+  const activeWorkflowRef = useRef<Workflow>(activeWorkflow);
+  const selectedLanguageRef = useRef<LanguageCode>(selectedLanguage);
+  const toolCallsRef = useRef<ToolCallRecord[]>([]);
+  const isLoadingRef = useRef<boolean>(false);
+  const handleSendMessageRef = useRef<(textToSend?: string) => Promise<void>>(async () => {});
+
   useEffect(() => {
     isLiveCallActiveRef.current = isLiveCallActive;
   }, [isLiveCallActive]);
@@ -104,6 +112,26 @@ export default function SimulatorPage() {
   useEffect(() => {
     voiceModeTypeRef.current = voiceModeType;
   }, [voiceModeType]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    extractedFieldsRef.current = extractedFields;
+  }, [extractedFields]);
+
+  useEffect(() => {
+    activeWorkflowRef.current = activeWorkflow;
+  }, [activeWorkflow]);
+
+  useEffect(() => {
+    selectedLanguageRef.current = selectedLanguage;
+  }, [selectedLanguage]);
+
+  useEffect(() => {
+    toolCallsRef.current = toolCalls;
+  }, [toolCalls]);
 
   useEffect(() => {
     const unsub = storageRepo.subscribe((s) => setAppState({ ...s }));
@@ -149,6 +177,7 @@ export default function SimulatorPage() {
   useEffect(() => {
     const wf = PREBUILT_TEMPLATES[selectedIndustry] || PREBUILT_TEMPLATES.cake_shop;
     setActiveWorkflow(wf);
+    activeWorkflowRef.current = wf;
     storageRepo.loadDemoBusiness(selectedIndustry);
 
     let initialGreeting = wf.greeting;
@@ -163,6 +192,10 @@ export default function SimulatorPage() {
       timestamp: new Date().toISOString(),
       language: selectedLanguage,
     };
+
+    messagesRef.current = [initialMsg];
+    extractedFieldsRef.current = {};
+    toolCallsRef.current = [];
 
     setMessages([initialMsg]);
     setExtractedFields({});
@@ -210,7 +243,7 @@ export default function SimulatorPage() {
       setVoiceErrorMessage(null);
 
       const session = await startAudioCapture({
-        language: selectedLanguage,
+        language: selectedLanguageRef.current,
         continuous: true,
         silenceTimeoutMs: 1300,
         onLiveTranscript: (text) => {
@@ -223,18 +256,16 @@ export default function SimulatorPage() {
           }
         },
         onSpeechEnd: async (finalTranscript) => {
-          // Automatic Turn End via Silence Detection (Zero Clicks Required!)
-          console.log("[Continuous Call] Auto-submitting speech turn:", finalTranscript);
-          if (finalTranscript.trim()) {
-            setLiveSpokenText("");
-            setIsRecording(false);
-            setVoiceState("processing");
-            recordingSessionRef.current?.pause();
-            await handleSendMessage(finalTranscript.trim());
-          }
+          const trimmed = finalTranscript.trim();
+          if (!trimmed || isLoadingRef.current) return;
+          console.log("[Continuous Call] Auto-submitting speech turn:", trimmed);
+          setLiveSpokenText("");
+          setIsRecording(false);
+          setVoiceState("processing");
+          recordingSessionRef.current?.pause();
+          await handleSendMessageRef.current(trimmed);
         },
         onBargeIn: () => {
-          // User started talking while AI was speaking!
           if (isSpeakingRef.current) {
             console.log("[Continuous Call] Barge-in detected, interrupting AI speech");
             handleInterruptSpeaking();
@@ -273,7 +304,7 @@ export default function SimulatorPage() {
       setHasTranscribedSpeech(false);
 
       const session = await startAudioCapture({
-        language: selectedLanguage,
+        language: selectedLanguageRef.current,
         continuous: false,
         onLiveTranscript: (text) => {
           setLiveSpokenText(text);
@@ -325,8 +356,8 @@ export default function SimulatorPage() {
         setInputText(finalTranscript);
         setHasTranscribedSpeech(true);
 
-        if (voiceModeType === "hands_free_call") {
-          await handleSendMessage(finalTranscript);
+        if (voiceModeTypeRef.current === "hands_free_call") {
+          await handleSendMessageRef.current(finalTranscript);
         } else {
           setTimeout(() => {
             inputRef.current?.focus();
@@ -372,7 +403,6 @@ export default function SimulatorPage() {
   // =========================================================================
   const speakAIResponse = async (textToSpeak: string, responseId?: string, isCallLoop = true) => {
     if (!audioEnabled || voiceCreditExhausted) {
-      // If audio is muted, return immediately to listening in live call mode
       if (isCallLoop && isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call") {
         setVoiceState("listening");
         recordingSessionRef.current?.resume();
@@ -390,7 +420,7 @@ export default function SimulatorPage() {
 
       await voiceEngine.speak({
         text: textToSpeak,
-        language: selectedLanguage as VoiceLanguage,
+        language: selectedLanguageRef.current as VoiceLanguage,
         speaker: voiceSpeaker,
         speed: voiceSpeed,
         responseId,
@@ -470,9 +500,11 @@ export default function SimulatorPage() {
     try {
       await voiceEngine.unlockAudio();
       setIsLiveCallActive(true);
+      isLiveCallActiveRef.current = true;
       setIsCallEnded(false);
       setIsMicMuted(false);
       setVoiceModeType("hands_free_call");
+      voiceModeTypeRef.current = "hands_free_call";
       setVoiceState("speaking");
 
       // Play ringing and connect chime
@@ -484,8 +516,8 @@ export default function SimulatorPage() {
       recordingSessionRef.current?.pause(); // Keep paused while greeting is vocalized
 
       // Speak initial greeting automatically -> When finished, auto-triggers listening!
-      const initialGreetingMsg = messages[0]?.content || activeWorkflow.greeting;
-      await speakAIResponse(initialGreetingMsg, messages[0]?.id, true);
+      const initialGreetingMsg = messagesRef.current[0]?.content || activeWorkflowRef.current.greeting;
+      await speakAIResponse(initialGreetingMsg, messagesRef.current[0]?.id, true);
     } catch (e) {
       console.warn("Start voice call error:", e);
     }
@@ -497,6 +529,7 @@ export default function SimulatorPage() {
     isSpeakingRef.current = false;
     await voiceEngine.playHangupTone();
     setIsLiveCallActive(false);
+    isLiveCallActiveRef.current = false;
     setIsCallEnded(true);
     setVoiceState("idle");
     setLiveSpokenText("");
@@ -513,15 +546,21 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // CORE CONVERSATION HANDLER
+  // CORE CONVERSATION HANDLER (State-Preserving Multi-Turn Logic)
   // =========================================================================
   const handleSendMessage = async (textToSend?: string) => {
-    const text = textToSend || inputText;
-    if (!text.trim() || isLoading) return;
+    const text = (textToSend !== undefined ? textToSend : inputText).trim();
+    if (!text || isLoadingRef.current) return;
 
     setInputText("");
     setLiveSpokenText("");
     setHasTranscribedSpeech(false);
+
+    // Read FRESH history and fields from refs to prevent closure stale states
+    const currentHistory = [...messagesRef.current];
+    const currentFields = { ...extractedFieldsRef.current };
+    const currentLang = selectedLanguageRef.current;
+    const currentWf = activeWorkflowRef.current;
 
     const userMsg: Message = {
       id: generateId("msg_user"),
@@ -529,11 +568,14 @@ export default function SimulatorPage() {
       role: "user",
       content: text,
       timestamp: new Date().toISOString(),
-      language: selectedLanguage,
+      language: currentLang,
     };
 
-    const newHistory = [...messages, userMsg];
+    const newHistory = [...currentHistory, userMsg];
+    messagesRef.current = newHistory;
     setMessages(newHistory);
+
+    isLoadingRef.current = true;
     setIsLoading(true);
 
     try {
@@ -546,12 +588,12 @@ export default function SimulatorPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             businessId: activeBiz.id,
-            workflowId: activeWorkflow.id,
+            workflowId: currentWf.id,
             conversationHistory: newHistory,
             latestUserMessage: text,
-            extractedFields,
+            extractedFields: currentFields,
             callerPhone: "+1 (555) 349-8800",
-            language: selectedLanguage,
+            language: currentLang,
           }),
         });
         if (res.ok) {
@@ -564,25 +606,29 @@ export default function SimulatorPage() {
       if (!result) {
         result = await processConversationTurn({
           business: activeBiz,
-          workflow: activeWorkflow,
+          workflow: currentWf,
           conversationHistory: newHistory,
           latestUserMessage: text,
-          extractedFields,
+          extractedFields: currentFields,
           callerPhone: "+1 (555) 349-8800",
-          language: selectedLanguage,
+          language: currentLang,
         });
       }
 
+      // Merge and save updated fields in both ref and state
+      const mergedFields = { ...currentFields, ...result.updatedExtractedFields };
+      extractedFieldsRef.current = mergedFields;
+      setExtractedFields(mergedFields);
+
       // Track newly updated fields for pulse effect
       const keysUpdated = Object.keys(result.updatedExtractedFields).filter(
-        (k) => result.updatedExtractedFields[k] !== extractedFields[k]
+        (k) => result.updatedExtractedFields[k] !== currentFields[k]
       );
       if (keysUpdated.length > 0) {
         setLastUpdatedField(keysUpdated[keysUpdated.length - 1]);
         setTimeout(() => setLastUpdatedField(null), 1800);
       }
 
-      setExtractedFields(result.updatedExtractedFields);
       setUrgency(result.urgency);
       setIsComplete(result.isComplete);
       setCurrentIntent(result.intent);
@@ -593,7 +639,9 @@ export default function SimulatorPage() {
       );
 
       if (result.toolCallsExecuted && result.toolCallsExecuted.length > 0) {
-        setToolCalls((prev) => [...prev, ...result.toolCallsExecuted]);
+        const updatedTools = [...toolCallsRef.current, ...result.toolCallsExecuted];
+        toolCallsRef.current = updatedTools;
+        setToolCalls(updatedTools);
       }
 
       const responseId = generateId("resp_ai");
@@ -607,7 +655,9 @@ export default function SimulatorPage() {
         language: result.detectedLanguage,
       };
 
-      setMessages((prev) => [...prev, aiMsg]);
+      const finalHistory = [...newHistory, aiMsg];
+      messagesRef.current = finalHistory;
+      setMessages(finalHistory);
 
       // If user indicated farewell, vocalize farewell then hang up
       if (isFarewell) {
@@ -622,8 +672,8 @@ export default function SimulatorPage() {
 
       // Vocalize AI Response and automatically resume continuous listening onEnd
       if (audioEnabled) {
-        await speakAIResponse(result.reply, responseId, isLiveCallActive);
-      } else if (isLiveCallActive && voiceModeType === "hands_free_call") {
+        await speakAIResponse(result.reply, responseId, isLiveCallActiveRef.current);
+      } else if (isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call") {
         setVoiceState("listening");
         recordingSessionRef.current?.resume();
       }
@@ -633,31 +683,38 @@ export default function SimulatorPage() {
         id: generateId("msg_err"),
         conversationId: "sim_conv",
         role: "assistant",
-        content: selectedLanguage === "kn" 
+        content: selectedLanguageRef.current === "kn" 
           ? "ಕ್ಷಮಿಸಿ, ಧ್ವನಿ ಸಂಪರ್ಕದಲ್ಲಿ ಸಣ್ಣ ದೋಷ ಕಂಡುಬಂದಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಹೇಳುವಿರಾ?"
-          : selectedLanguage === "hi"
+          : selectedLanguageRef.current === "hi"
           ? "क्षमा करें, आवाज़ में थोड़ी रुकावट आई। क्या आप कृपया दोबारा बोलेंगे?"
           : "I apologize, I experienced a brief audio glitch. Could you please repeat that?",
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, errorMsg]);
-      if (isLiveCallActive && voiceModeType === "hands_free_call") {
+      const finalHistory = [...messagesRef.current, errorMsg];
+      messagesRef.current = finalHistory;
+      setMessages(finalHistory);
+
+      if (isLiveCallActiveRef.current && voiceModeTypeRef.current === "hands_free_call") {
         setVoiceState("listening");
         recordingSessionRef.current?.resume();
       }
     } finally {
+      isLoadingRef.current = false;
       setIsLoading(false);
     }
   };
+
+  // Update callback ref on every render
+  handleSendMessageRef.current = handleSendMessage;
 
   const handleReset = () => {
     voiceEngine.stopSpeaking();
     isSpeakingRef.current = false;
     cancelRecording();
 
-    let initialGreeting = activeWorkflow.greeting;
-    if (selectedLanguage === "kn" && activeWorkflow.greetingKn) initialGreeting = activeWorkflow.greetingKn;
-    else if ((selectedLanguage === "hi" || selectedLanguage === "hinglish") && activeWorkflow.greetingHi) initialGreeting = activeWorkflow.greetingHi;
+    let initialGreeting = activeWorkflowRef.current.greeting;
+    if (selectedLanguageRef.current === "kn" && activeWorkflowRef.current.greetingKn) initialGreeting = activeWorkflowRef.current.greetingKn;
+    else if ((selectedLanguageRef.current === "hi" || selectedLanguageRef.current === "hinglish") && activeWorkflowRef.current.greetingHi) initialGreeting = activeWorkflowRef.current.greetingHi;
 
     const initialMsg: Message = {
       id: generateId("msg_init"),
@@ -665,8 +722,12 @@ export default function SimulatorPage() {
       role: "assistant",
       content: initialGreeting,
       timestamp: new Date().toISOString(),
-      language: selectedLanguage,
+      language: selectedLanguageRef.current,
     };
+
+    messagesRef.current = [initialMsg];
+    extractedFieldsRef.current = {};
+    toolCallsRef.current = [];
 
     setMessages([initialMsg]);
     setExtractedFields({});
@@ -675,6 +736,7 @@ export default function SimulatorPage() {
     setIsComplete(false);
     setIsCallEnded(false);
     setIsLiveCallActive(false);
+    isLiveCallActiveRef.current = false;
     setIsMicMuted(false);
     setVoiceState("idle");
     setLastUpdatedField(null);
@@ -688,21 +750,22 @@ export default function SimulatorPage() {
 
   const handleSaveToDashboard = () => {
     const activeBiz = storageRepo.getActiveBusiness();
-    const callerName = extractedFields.customer_name || extractedFields.patient_name || "Simulation Caller";
-    const callerPhone = extractedFields.phone_number || "+1 (555) 349-8800";
+    const fields = extractedFieldsRef.current;
+    const callerName = fields.customer_name || fields.patient_name || "Simulation Caller";
+    const callerPhone = fields.phone_number || "+1 (555) 349-8800";
     storageRepo.createConversation({
       businessId: activeBiz.id,
-      workflowId: activeWorkflow.id,
+      workflowId: activeWorkflowRef.current.id,
       callerName,
       callerNumber: callerPhone,
       status: "new",
       urgency,
       intent: currentIntent,
-      summary: `Continuous Voice Session for ${activeBiz.name}. Captured ${Object.keys(extractedFields).length}/${activeWorkflow.fields.length} fields: ${JSON.stringify(extractedFields)}.`,
-      extractedFields,
-      language: selectedLanguage,
-      toolCalls,
-      messages,
+      summary: `Continuous Voice Session for ${activeBiz.name}. Captured ${Object.keys(fields).length}/${activeWorkflowRef.current.fields.length} fields: ${JSON.stringify(fields)}.`,
+      extractedFields: fields,
+      language: selectedLanguageRef.current,
+      toolCalls: toolCallsRef.current,
+      messages: messagesRef.current,
       completedAt: isComplete ? new Date().toISOString() : undefined,
     });
 
@@ -711,7 +774,7 @@ export default function SimulatorPage() {
   };
 
   const handleCopyJson = () => {
-    navigator.clipboard.writeText(JSON.stringify(extractedFields, null, 2));
+    navigator.clipboard.writeText(JSON.stringify(extractedFieldsRef.current, null, 2));
     setCopiedJson(true);
     setTimeout(() => setCopiedJson(false), 2000);
   };
@@ -748,29 +811,30 @@ export default function SimulatorPage() {
 
   // Smart contextual suggestion chips
   const getContextualChips = () => {
+    const fields = extractedFieldsRef.current;
     if (selectedLanguage === "kn") {
       if (selectedIndustry === "clinic") {
-        if (!extractedFields.patient_name) return ["ರಾಹುಲ್", "ಪ್ರಿಯಾ", "ಸುರೇಶ್"];
-        if (!extractedFields.doctor_speciality) return ["ಡಾ. ಶರ್ಮಾ (ಜನರಲ್)", "ಡಾ. ಕಪೂರ್ (ಡೆಂಟಿಸ್ಟ್)", "ಡಾ. ಮೆಹ್ತಾ (ಹೃದಯ ತಜ್ಞ)"];
-        if (!extractedFields.preferred_date) return ["ನಾಳೆ", "ಇವತ್ತು", "ಶುಕ್ರವಾರ"];
+        if (!fields.patient_name) return ["ರಾಹುಲ್", "ಪ್ರಿಯಾ", "ಸುರೇಶ್"];
+        if (!fields.doctor_speciality) return ["ಡಾ. ಶರ್ಮಾ (ಜನರಲ್)", "ಡಾ. ಕಪೂರ್ (ಡೆಂಟಿಸ್ಟ್)", "ಡಾ. ಮೆಹ್ತಾ (ಹೃದಯ ತಜ್ಞ)"];
+        if (!fields.preferred_date) return ["ನಾಳೆ", "ಇವತ್ತು", "ಶುಕ್ರವಾರ"];
         return ["ಸಂಜೆ 4 ಗಂಟೆಗೆ", "ಬೆಳಿಗ್ಗೆ 10:00", "ಹೌದು, ಬುಕ್ ಮಾಡಿ"];
       }
       return ["ನಾಳೆ", "ಚಾಕೊಲೇಟ್", "ಹೌದು, ಕನ್ಫರ್ಮ್ ಮಾಡಿ"];
     }
 
     if (selectedIndustry === "cake_shop") {
-      if (!extractedFields.customer_name) return ["Anusha", "Priya Sharma", "Rahul Verma"];
-      if (!extractedFields.flavor) return ["Chocolate Truffle", "Red Velvet", "Butterscotch", "Vanilla Bean"];
-      if (!extractedFields.weight) return ["1 kg", "2 kg", "0.5 kg (Half kg)", "for 15 people"];
-      if (!extractedFields.required_date) return ["In 6 hours", "Tomorrow at 5 PM", "Tonight 8 PM"];
-      if (!extractedFields.delivery_type) return ["Store Pickup", "Home Delivery"];
+      if (!fields.customer_name) return ["Lakshmi", "Anusha", "Priya Sharma", "Rahul Verma"];
+      if (!fields.flavor) return ["Chocolate Truffle", "Red Velvet", "Butterscotch", "Vanilla Bean"];
+      if (!fields.weight) return ["1 kg", "2 kg", "0.5 kg (Half kg)", "for 15 people"];
+      if (!fields.required_date) return ["In 6 hours", "Tomorrow at 5 PM", "Tonight 8 PM"];
+      if (!fields.delivery_type) return ["Store Pickup", "Home Delivery"];
       return ["+1 (555) 349-8800", "Under ₹1,500", "All details confirmed!"];
     }
 
     if (selectedIndustry === "clinic") {
-      if (!extractedFields.patient_name) return ["John Doe", "Sarah Jenkins", "Vikram Patel"];
-      if (!extractedFields.doctor_speciality) return ["General Physician (Dr. Sharma)", "Dentist (Dr. Kapoor)", "Cardiologist (Dr. Mehta)"];
-      if (!extractedFields.preferred_date) return ["Tomorrow", "This Friday", "Today afternoon"];
+      if (!fields.patient_name) return ["Lakshmi", "John Doe", "Sarah Jenkins", "Vikram Patel"];
+      if (!fields.doctor_speciality) return ["General Physician (Dr. Sharma)", "Dentist (Dr. Kapoor)", "Cardiologist (Dr. Mehta)"];
+      if (!fields.preferred_date) return ["Tomorrow", "This Friday", "Today afternoon"];
       return ["3:00 PM", "10:00 AM", "Yes, book it!"];
     }
     return ["DEL-9821", "Tomorrow 10 AM", "Confirm order"];
@@ -792,7 +856,7 @@ export default function SimulatorPage() {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
               Continuous Hands-Free Voice Agent
             </span>
-            <span className="text-[10px] font-mono text-slate-400">Zero Clicks Needed • Live Turn-Taking</span>
+            <span className="text-[10px] font-mono text-slate-400">Zero Clicks Needed • Live Multi-Turn State</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5 pt-1">
@@ -995,7 +1059,7 @@ export default function SimulatorPage() {
                   }`} />
                   <span className="absolute -top-1 -right-1 flex h-4 w-4">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950" />
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-955" />
                   </span>
                 </>
               )}
