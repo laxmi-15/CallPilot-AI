@@ -167,6 +167,64 @@ async function runTests() {
     assert(cust !== undefined && cust.name === "Automated Test User", "Auto-creates CRM customer record");
   }
 
+  // 8. Multi-Turn Clinic Appointment & Conflict Resolution
+  console.log("\n8. Testing Multi-Turn Clinic Appointment Flow & No Self-Conflict:");
+  {
+    const { processConversationTurn } = await import("../src/lib/ai/orchestrator");
+    const biz = storageRepo.getBusiness("biz_metro_health")!;
+
+    // Turn 1: Caller requests appointment without name
+    const turn1 = await processConversationTurn({
+      business: biz,
+      workflow: CLINIC_WORKFLOW,
+      conversationHistory: [],
+      latestUserMessage: "Want to book an appointment with Dr. Sharma at September 4 on 1:39 AM",
+      extractedFields: {},
+      callerPhone: "+1 (555) 349-8800",
+    });
+
+    assert(turn1.toolCallsExecuted.some((t) => t.toolName === "calendar.checkAvailability"), "Turn 1 checks calendar availability");
+    assert(!turn1.reply.includes("unavailable"), "Turn 1 reports available slot");
+    assert(turn1.reply.includes("name") || turn1.reply.includes("full name"), "Turn 1 asks for patient name");
+
+    // Turn 2: Caller provides name
+    const turn2MsgHistory = [
+      { id: "m1", conversationId: "c1", role: "user" as const, content: "Want to book an appointment with Dr. Sharma at September 4 on 1:39 AM", timestamp: "" },
+      { id: "m2", conversationId: "c1", role: "assistant" as const, content: turn1.reply, toolCalls: turn1.toolCallsExecuted, timestamp: "" },
+    ];
+
+    const turn2 = await processConversationTurn({
+      business: biz,
+      workflow: CLINIC_WORKFLOW,
+      conversationHistory: turn2MsgHistory,
+      latestUserMessage: "My name is Priya Sharma",
+      extractedFields: turn1.updatedExtractedFields,
+      callerPhone: "+1 (555) 349-8800",
+    });
+
+    assert(turn2.toolCallsExecuted.some((t) => t.toolName === "calendar.createEvent"), "Turn 2 creates calendar event for Priya");
+    assert(turn2.reply.includes("confirmed") || turn2.reply.includes("reserved"), "Turn 2 confirms booking on Google Calendar");
+
+    // Turn 3: Caller says "ok, thank you"
+    const turn3MsgHistory = [
+      ...turn2MsgHistory,
+      { id: "m3", conversationId: "c1", role: "user" as const, content: "My name is Priya Sharma", timestamp: "" },
+      { id: "m4", conversationId: "c1", role: "assistant" as const, content: turn2.reply, toolCalls: turn2.toolCallsExecuted, timestamp: "" },
+    ];
+
+    const turn3 = await processConversationTurn({
+      business: biz,
+      workflow: CLINIC_WORKFLOW,
+      conversationHistory: turn3MsgHistory,
+      latestUserMessage: "ok, thank you",
+      extractedFields: turn2.updatedExtractedFields,
+      callerPhone: "+1 (555) 349-8800",
+    });
+
+    assert(!turn3.reply.includes("unavailable"), "Turn 3 NEVER falsely marks confirmed booking as unavailable");
+    assert(turn3.reply.toLowerCase().includes("welcome") || turn3.reply.toLowerCase().includes("confirmed"), "Turn 3 acknowledges confirmed appointment warmly");
+  }
+
   console.log("\n==========================================");
   console.log(`Results: ${passed} Passed, ${failed} Failed`);
   console.log("==========================================\n");

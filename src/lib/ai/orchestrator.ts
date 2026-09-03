@@ -573,6 +573,17 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
     const prefTime = newFields.preferred_time || "";
     const intentType = newFields.appointment_intent || intent;
 
+    // Check if appointment was already created and confirmed in this conversation session
+    const alreadyBooked = conversationHistory.some((m) =>
+      m.toolCalls?.some((tc) => tc.toolName === "calendar.createEvent" && tc.status === "success")
+    );
+
+    const isThankYouOrAck = [
+      "thank", "thanks", "ok", "okay", "alright", "great", "perfect", "bye", "goodbye", "done", "sounds good",
+      "ಧನ್ಯವಾದ", "ಸರಿ", "ಆಯಿತು", "ಶುಭ", "ಉತ್ತಮ", "ಸಾಕು",
+      "धन्यवाद", "शुक्रिया", "ठीक है", "अच्छा", "अलविदा"
+    ].some((w) => latestUserMessage.toLowerCase().includes(w));
+
     if (intentType.toLowerCase().includes("cancel") || latestUserMessage.includes("ರದ್ದು")) {
       const cancelRes = await toolRegistry.executeTool("calendar.cancelEvent", {
         attendeeName: patientName || "Patient",
@@ -595,7 +606,16 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
       } else {
         aiReply = `I have cancelled your appointment on our calendar as requested. Please let me know if you would like to book for another day.`;
       }
-    } else if (prefDate && prefTime) {
+    } else if (alreadyBooked && isThankYouOrAck) {
+      // APPOINTMENT IS ALREADY CONFIRMED: Respond warmly without re-checking availability against its own event!
+      if (detectedLang === "kn") {
+        aiReply = `ನಿಮಗೆ ಸ್ವಾಗತ, ${patientName || ""}! ${prefDate} ರಂದು ${prefTime} ಗೆ ${newFields.doctor_speciality || "ಡಾ. ಶರ್ಮಾ"} ಅವರೊಂದಿಗೆ ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಕನ್ಫರ್ಮ್ ಆಗಿದೆ. ಶುಭ ದಿನ!`;
+      } else if (detectedLang === "hi" || detectedLang === "hinglish") {
+        aiReply = `आपका बहुत-बहुत स्वागत है, ${patientName || ""}! ${prefDate} को ${prefTime} पर ${newFields.doctor_speciality || "डॉक्टर"} के साथ आपका अपॉइंटमेंट कन्फर्म है। आपका दिन शुभ हो!`;
+      } else {
+        aiReply = `You're very welcome, ${patientName || "there"}! Your appointment with ${newFields.doctor_speciality || "Dr. Sharma"} on ${prefDate} at ${prefTime} is confirmed on Google Calendar. Have a wonderful day!`;
+      }
+    } else if (prefDate && prefTime && !alreadyBooked) {
       // Step A: Check Google Calendar Availability
       const availRes = await toolRegistry.executeTool("calendar.checkAvailability", {
         date: prefDate,
@@ -628,47 +648,42 @@ export async function processConversationTurn(input: AIProcessInput): Promise<AI
           aiReply = `I checked our Google Calendar, but ${newFields.doctor_speciality || "Dr. Sharma"} is unavailable on ${prefDate} at ${prefTime} due to an existing booking. Would you like to schedule for one of our open slots instead, such as ${altText}?`;
         }
       } else {
-        // SLOT AVAILABLE: If patient name is provided or confirmed, create the reservation on Google Calendar
-        const attendee = patientName || "Patient";
-        const isBookingConfirmation = [
-          "yes", "yeah", "book", "confirm", "sure", "ok", "okay",
-          "ಹೌದು", "ಖಂಡಿತ", "ಬುಕ್ ಮಾಡಿ", "ಸರಿ", "ಮಾಡಿಸಿ",
-          "हाँ", "बुक कर दो", "कन्फर्म"
-        ].some((w) => latestUserMessage.toLowerCase().includes(w));
+        // SLOT AVAILABLE:
+        if (patientName) {
+          // Patient name is present -> Create event & confirm!
+          const bookRes = await toolRegistry.executeTool("calendar.createEvent", {
+            title: `Clinic Consultation: ${patientName} (${newFields.doctor_speciality || "Doctor"})`,
+            attendeeName: patientName,
+            attendeePhone: newFields.phone_number || callerPhone,
+            date: prefDate,
+            time: prefTime,
+            description: `Doctor: ${newFields.doctor_speciality || "General"}\nGoogle Calendar Verified Booking`,
+          }, { businessId: business.id, callerPhone });
 
-        const bookRes = await toolRegistry.executeTool("calendar.createEvent", {
-          title: `Clinic Consultation: ${attendee} (${newFields.doctor_speciality || "Doctor"})`,
-          attendeeName: attendee,
-          attendeePhone: newFields.phone_number || callerPhone,
-          date: prefDate,
-          time: prefTime,
-          description: `Doctor: ${newFields.doctor_speciality || "General"}\nGoogle Calendar Verified Booking`,
-        }, { businessId: business.id, callerPhone });
+          toolCallsExecuted.push({
+            id: generateId("tool_book"),
+            toolName: "calendar.createEvent",
+            input: { title: `Clinic Consultation: ${patientName}`, attendeeName: patientName, date: prefDate, time: prefTime },
+            output: bookRes.data,
+            status: bookRes.success ? "success" : "error",
+            timestamp: new Date().toISOString(),
+          });
 
-        toolCallsExecuted.push({
-          id: generateId("tool_book"),
-          toolName: "calendar.createEvent",
-          input: { title: `Clinic Consultation: ${attendee}`, attendeeName: attendee, date: prefDate, time: prefTime },
-          output: bookRes.data,
-          status: bookRes.success ? "success" : "error",
-          timestamp: new Date().toISOString(),
-        });
-
-        if (patientName || isBookingConfirmation) {
           if (detectedLang === "kn") {
-            aiReply = `ಅತ್ಯುತ್ತಮ ${patientName || ""}! ನಾನು Google Calendar ಪರಿಶೀಲಿಸಿ ${prefDate} ರಂದು ${prefTime} ಗೆ ${newFields.doctor_speciality || "ಡಾ. ಶರ್ಮಾ"} ಅವರೊಂದಿಗೆ ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಅನ್ನು ಕನ್ಫರ್ಮ್ ಮಾಡಿದ್ದೇನೆ. ಗೂಗಲ್ ಕ್ಯಾಲೆಂಡರ್ ಆಮಂತ್ರಣವನ್ನು ಕಾಯ್ದಿರಿಸಲಾಗಿದೆ.`;
+            aiReply = `ಅತ್ಯುತ್ತಮ ${patientName}! ನಾನು Google Calendar ಪರಿಶೀಲಿಸಿ ${prefDate} ರಂದು ${prefTime} ಗೆ ${newFields.doctor_speciality || "ಡಾ. ಶರ್ಮಾ"} ಅವರೊಂದಿಗೆ ನಿಮ್ಮ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್ ಅನ್ನು ಕನ್ಫರ್ಮ್ ಮಾಡಿದ್ದೇನೆ. ಗೂಗಲ್ ಕ್ಯಾಲೆಂಡರ್ ಆಮಂತ್ರಣವನ್ನು ಕಾಯ್ದಿರಿಸಲಾಗಿದೆ.`;
           } else if (detectedLang === "hi" || detectedLang === "hinglish") {
-            aiReply = `बहुत बढ़िया ${patientName || ""}! मैंने Google Calendar चेक किया और ${prefDate} को ${prefTime} पर ${newFields.doctor_speciality || "डॉक्टर"} के साथ आपका अपॉइंटमेंट कन्फर्म कर दिया है।`;
+            aiReply = `बहुत बढ़िया ${patientName}! मैंने Google Calendar चेक किया और ${prefDate} को ${prefTime} पर ${newFields.doctor_speciality || "डॉक्टर"} के साथ आपका अपॉइंटमेंट कन्फर्म कर दिया है।`;
           } else {
-            aiReply = `Excellent, ${patientName || "there"}! I checked our Google Calendar and confirmed your appointment with ${newFields.doctor_speciality || "Dr. Sharma"} for ${prefDate} at ${prefTime}. A Google Calendar invitation has been reserved.`;
+            aiReply = `Excellent, ${patientName}! I checked our Google Calendar and confirmed your appointment with ${newFields.doctor_speciality || "Dr. Sharma"} for ${prefDate} at ${prefTime}. A Google Calendar invitation has been reserved.`;
           }
         } else {
+          // Slot is available, but need patient name to complete booking!
           if (detectedLang === "kn") {
-            aiReply = `ಉತ್ತಮ ಸುದ್ದಿ! ನಾನು Google Calendar ಪರಿಶೀಲಿಸಿದ್ದೇನೆ ಮತ್ತು ${prefDate} ರಂದು ${prefTime} ಗೆ ಸ್ಲಾಟ್ ಲಭ್ಯವಿದೆ. ಬುಕಿಂಗ್ ಪೂರ್ಣಗೊಳಿಸಲು ದಯವಿಟ್ಟು ರೋಗಿಯ ಹೆಸರನ್ನು ತಿಳಿಸಿ?`;
+            aiReply = `ಉತ್ತಮ ಸುದ್ದಿ! ನಾನು Google Calendar ಪರಿಶೀಲಿಸಿದ್ದೇನೆ ಮತ್ತು ${prefDate} ರಂದು ${prefTime} ಗೆ ಸ್ಲಾಟ್ ಲಭ್ಯವಿದೆ. ಬುಕಿಂಗ್ ಪೂರ್ಣಗೊಳಿಸಲು ದಯವಿಟ್ಟು ರೋಗಿಯ ಪೂರ್ಣ ಹೆಸರನ್ನು ತಿಳಿಸುವಿರಾ?`;
           } else if (detectedLang === "hi" || detectedLang === "hinglish") {
             aiReply = `बहुत बढ़िया! मैंने Google Calendar चेक किया और ${prefDate} को ${prefTime} पर स्लॉट उपलब्ध है। बुकिंग पूरी करने के लिए कृपया अपना नाम बताएं?`;
           } else {
-            aiReply = `Great news! I checked our Google Calendar and ${prefDate} at ${prefTime} is open and available. May I please have your name to complete the reservation?`;
+            aiReply = `Great news! I checked our Google Calendar and ${prefDate} at ${prefTime} is open and available. May I please have your full name to complete the reservation?`;
           }
         }
       }
