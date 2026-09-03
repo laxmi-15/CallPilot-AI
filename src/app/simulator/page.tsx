@@ -28,6 +28,10 @@ import {
   Check,
   Loader2,
   Edit3,
+  Play,
+  Pause,
+  Sliders,
+  PhoneOff,
 } from "lucide-react";
 import { storageRepo, AppState } from "@/lib/store/storage";
 import { PREBUILT_TEMPLATES } from "@/lib/workflow/templates";
@@ -35,6 +39,7 @@ import { processConversationTurn } from "@/lib/ai/orchestrator";
 import { Message, ToolCallRecord, UrgencyLevel, LanguageCode, Workflow, VoiceState } from "@/types";
 import { Button, Badge, ProgressBar } from "@/components/ui";
 import { generateId, formatTime } from "@/lib/utils";
+import { voiceEngine, VoiceLanguage, VoiceSpeaker } from "@/lib/voice/voiceEngine";
 
 export default function SimulatorPage() {
   const [appState, setAppState] = useState<AppState>(storageRepo.getState());
@@ -50,24 +55,30 @@ export default function SimulatorPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>("en");
+  const [voiceSpeaker, setVoiceSpeaker] = useState<VoiceSpeaker>("shubh");
+  const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [lastUpdatedField, setLastUpdatedField] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [isCallEnded, setIsCallEnded] = useState(false);
+  const [isLiveCallActive, setIsLiveCallActive] = useState(false);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [autoListenAfterSpeech, setAutoListenAfterSpeech] = useState(true);
 
   // =========================================================================
-  // CHATGPT-STYLE VOICE DICTATION & REAL MULTILINGUAL ENGINE
+  // VOICE DICTATION & REAL MULTILINGUAL ENGINE
   // =========================================================================
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [voiceModeType, setVoiceModeType] = useState<"dictate" | "live_call">("dictate");
+  const [voiceModeType, setVoiceModeType] = useState<"dictate" | "live_call">("live_call");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceProviderStatus, setVoiceProviderStatus] = useState<{ configured: boolean; provider: string } | null>(null);
   const [voiceCreditExhausted, setVoiceCreditExhausted] = useState(false);
   const [liveVolume, setLiveVolume] = useState<number>(0);
   const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | null>(null);
+  const [isTestingAudio, setIsTestingAudio] = useState(false);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -77,7 +88,6 @@ export default function SimulatorPage() {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const animFrameRef = useRef<number | null>(null);
   const isSpeakingRef = useRef<boolean>(false);
@@ -99,7 +109,7 @@ export default function SimulatorPage() {
 
   // Call duration interval timer
   useEffect(() => {
-    if (!isCallEnded) {
+    if (isLiveCallActive && !isCallEnded) {
       timerRef.current = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
@@ -112,16 +122,13 @@ export default function SimulatorPage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isCallEnded]);
+  }, [isLiveCallActive, isCallEnded]);
 
   // Clean up audio streams on unmount
   useEffect(() => {
     return () => {
       stopMicrophoneStream();
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current = null;
-      }
+      voiceEngine.stopSpeaking();
     };
   }, []);
 
@@ -150,10 +157,12 @@ export default function SimulatorPage() {
     setUrgency("NORMAL");
     setIsComplete(false);
     setIsCallEnded(false);
+    setIsLiveCallActive(false);
     setLastUpdatedField(null);
     setSavedSuccess(false);
     setCallDuration(0);
     setVoiceErrorMessage(null);
+    setPlayingMessageId(null);
   }, [selectedIndustry, selectedLanguage]);
 
   useEffect(() => {
@@ -163,7 +172,7 @@ export default function SimulatorPage() {
         behavior: "smooth",
       });
     }
-  }, [messages, isLoading, isTranscribing]);
+  }, [messages, isLoading, isTranscribing, isSpeakingRef.current]);
 
   const formatCallDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -172,10 +181,16 @@ export default function SimulatorPage() {
   };
 
   // =========================================================================
-  // CHATGPT-STYLE AUDIO CAPTURE & STREAMING VISUALIZER
+  // AUDIO CAPTURE & STREAMING VISUALIZER
   // =========================================================================
   const startRecording = async () => {
     try {
+      // If assistant is currently speaking, stop it first
+      if (voiceEngine.getIsSpeaking()) {
+        voiceEngine.stopSpeaking();
+      }
+
+      await voiceEngine.unlockAudio();
       setVoiceState("requesting_permission");
       setVoiceErrorMessage(null);
       setRecordingSeconds(0);
@@ -191,7 +206,8 @@ export default function SimulatorPage() {
       audioStreamRef.current = stream;
 
       // Web Audio Analyser for real-time soundwave animation
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtxClass();
       audioContextRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -268,7 +284,9 @@ export default function SimulatorPage() {
       audioStreamRef.current = null;
     }
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
+      try {
+        audioContextRef.current.close();
+      } catch (e) {}
       audioContextRef.current = null;
     }
     setIsRecording(false);
@@ -324,10 +342,10 @@ export default function SimulatorPage() {
 
         if (transcript) {
           if (voiceModeType === "live_call") {
-            // Auto-send in hands-free call mode
+            // Auto-send in hands-free live call mode
             await handleSendMessage(transcript);
           } else {
-            // ChatGPT Style: Populate input text box for immediate user review and editing!
+            // Dictate mode: populate input box for review
             setInputText((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
             setTimeout(() => {
               inputRef.current?.focus();
@@ -351,76 +369,114 @@ export default function SimulatorPage() {
     setVoiceState("idle");
   };
 
-  // Synthesize & Play AI Voice with Sarvam Bulbul v3 TTS
-  const speakAIResponse = async (textToSpeak: string, responseId: string) => {
+  // =========================================================================
+  // DUAL-ENGINE AI SPEECH PLAYBACK (Sarvam Bulbul v3 + Web Speech Fallback)
+  // =========================================================================
+  const speakAIResponse = async (textToSpeak: string, responseId?: string, autoListenAfter = true) => {
     if (!audioEnabled || voiceCreditExhausted) return;
 
     try {
       isSpeakingRef.current = true;
       setVoiceState("speaking");
+      if (responseId) setPlayingMessageId(responseId);
 
-      const ttsRes = await fetch("/api/voice/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: textToSpeak,
-          language: selectedLanguage,
-          responseId,
-          speaker: "shubh",
-        }),
-      });
-
-      if (ttsRes.status === 402) {
-        setVoiceCreditExhausted(true);
-        setVoiceState("idle");
-        isSpeakingRef.current = false;
-        return;
-      }
-
-      if (ttsRes.ok) {
-        const ttsData = await ttsRes.json();
-        if (ttsData.audioBase64) {
-          if (audioPlayerRef.current) {
-            audioPlayerRef.current.pause();
-          }
-
-          const audio = new Audio(`data:audio/wav;base64,${ttsData.audioBase64}`);
-          audioPlayerRef.current = audio;
-
-          audio.onended = () => {
-            isSpeakingRef.current = false;
-            setVoiceState("idle");
-          };
-
-          audio.onerror = () => {
-            isSpeakingRef.current = false;
-            setVoiceState("idle");
-          };
-
-          await audio.play();
-        } else {
+      await voiceEngine.speak({
+        text: textToSpeak,
+        language: selectedLanguage as VoiceLanguage,
+        speaker: voiceSpeaker,
+        speed: voiceSpeed,
+        responseId,
+        onStart: () => {
+          isSpeakingRef.current = true;
+          setVoiceState("speaking");
+        },
+        onEnd: () => {
           isSpeakingRef.current = false;
           setVoiceState("idle");
-        }
-      } else {
-        isSpeakingRef.current = false;
-        setVoiceState("idle");
-      }
+          setPlayingMessageId(null);
+
+          // In hands-free live call mode, automatically listen after agent finishes speaking!
+          if (voiceModeType === "live_call" && autoListenAfter && !isCallEnded && autoListenAfterSpeech) {
+            setTimeout(() => {
+              if (!isSpeakingRef.current && !isRecording) {
+                startRecording();
+              }
+            }, 400);
+          }
+        },
+        onError: (err) => {
+          console.warn("Audio vocalization notice:", err);
+          isSpeakingRef.current = false;
+          setVoiceState("idle");
+          setPlayingMessageId(null);
+        },
+      });
     } catch (err) {
-      console.warn("TTS Playback note:", err);
+      console.warn("speakAIResponse catch:", err);
       isSpeakingRef.current = false;
       setVoiceState("idle");
+      setPlayingMessageId(null);
     }
   };
 
   // Interrupt / Stop speech playback
   const handleInterruptSpeaking = () => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
+    voiceEngine.stopSpeaking();
     isSpeakingRef.current = false;
     setVoiceState("idle");
+    setPlayingMessageId(null);
+  };
+
+  // Play / Replay specific message
+  const handleReplayMessage = async (msg: Message) => {
+    if (playingMessageId === msg.id) {
+      // Toggle stop
+      handleInterruptSpeaking();
+      return;
+    }
+    await speakAIResponse(msg.content, msg.id, false);
+  };
+
+  // =========================================================================
+  // VOICE-FIRST TELEPHONY CONTROLS (Call In / Out)
+  // =========================================================================
+  const handleStartVoiceCall = async () => {
+    try {
+      await voiceEngine.unlockAudio();
+      setIsLiveCallActive(true);
+      setIsCallEnded(false);
+      setVoiceModeType("live_call");
+
+      // Play ringing and connect chime
+      await voiceEngine.playRingTone(1.2);
+      await voiceEngine.playConnectChime();
+
+      // Speak initial greeting automatically!
+      const initialGreetingMsg = messages[0]?.content || activeWorkflow.greeting;
+      await speakAIResponse(initialGreetingMsg, messages[0]?.id, true);
+    } catch (e) {
+      console.warn("Start voice call error:", e);
+    }
+  };
+
+  const handleEndVoiceCall = async () => {
+    stopMicrophoneStream();
+    voiceEngine.stopSpeaking();
+    isSpeakingRef.current = false;
+    await voiceEngine.playHangupTone();
+    setIsLiveCallActive(false);
+    setIsCallEnded(true);
+    setVoiceState("idle");
+  };
+
+  const handleTestAudio = async () => {
+    try {
+      setIsTestingAudio(true);
+      await voiceEngine.testAudio();
+      setTimeout(() => setIsTestingAudio(false), 2500);
+    } catch (e) {
+      setIsTestingAudio(false);
+    }
   };
 
   // =========================================================================
@@ -500,10 +556,8 @@ export default function SimulatorPage() {
         (w) => lowerText.includes(w) || text.includes(w)
       );
 
-      if (isFarewell || (result.isComplete && Object.keys(result.updatedExtractedFields).length >= activeWorkflow.fields.filter((f) => f.required).length)) {
-        if (isFarewell) {
-          setIsCallEnded(true);
-        }
+      if (isFarewell) {
+        handleEndVoiceCall();
       }
 
       if (result.toolCallsExecuted && result.toolCallsExecuted.length > 0) {
@@ -523,9 +577,9 @@ export default function SimulatorPage() {
 
       setMessages((prev) => [...prev, aiMsg]);
 
-      // Trigger Sarvam Bulbul v3 TTS Audio Playback
+      // Trigger Voice Playback with Dual-Engine Voice Synthesizer
       if (audioEnabled) {
-        speakAIResponse(result.reply, responseId);
+        speakAIResponse(result.reply, responseId, true);
       }
     } catch (err: any) {
       console.error("Simulation error:", err);
@@ -547,10 +601,7 @@ export default function SimulatorPage() {
   };
 
   const handleReset = () => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
+    voiceEngine.stopSpeaking();
     isSpeakingRef.current = false;
     cancelRecording();
 
@@ -573,11 +624,13 @@ export default function SimulatorPage() {
     setUrgency("NORMAL");
     setIsComplete(false);
     setIsCallEnded(false);
+    setIsLiveCallActive(false);
     setVoiceState("idle");
     setLastUpdatedField(null);
     setSavedSuccess(false);
     setCallDuration(0);
     setInputText("");
+    setPlayingMessageId(null);
   };
 
   const handleSaveToDashboard = () => {
@@ -592,7 +645,7 @@ export default function SimulatorPage() {
       status: "new",
       urgency,
       intent: currentIntent,
-      summary: `Multilingual Voice & Text session for ${activeBiz.name}. Captured ${Object.keys(extractedFields).length}/${activeWorkflow.fields.length} fields: ${JSON.stringify(extractedFields)}.`,
+      summary: `Voice-first session for ${activeBiz.name}. Captured ${Object.keys(extractedFields).length}/${activeWorkflow.fields.length} fields: ${JSON.stringify(extractedFields)}.`,
       extractedFields,
       language: selectedLanguage,
       toolCalls,
@@ -610,7 +663,7 @@ export default function SimulatorPage() {
     setTimeout(() => setCopiedJson(false), 2000);
   };
 
-  // 1-Click Test Prompts (English, Hindi, and Kannada)
+  // 1-Click Realistic Test Prompts (English, Hindi, and Kannada)
   const quickPrompts: Record<string, { label: string; text: string; tag: string }[]> = {
     cake_shop: [
       { label: "🎂 Urgent 2kg Chocolate Order", text: "Hi, I need a 2kg chocolate truffle cake by 6 hours for pickup.", tag: "Urgent <24h" },
@@ -682,10 +735,11 @@ export default function SimulatorPage() {
         {/* Industry Selector */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60">
-              Interactive AI Voice & Text Simulator
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60 flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
+              Voice-First AI Assistant Cockpit
             </span>
-            <span className="text-[10px] font-mono text-slate-400">₹0 Out-of-Pocket</span>
+            <span className="text-[10px] font-mono text-slate-400">Sarvam Bulbul v3 + Web Speech Fallback</span>
           </div>
 
           <div className="flex items-center flex-wrap gap-1.5 pt-1">
@@ -714,7 +768,7 @@ export default function SimulatorPage() {
           </div>
         </div>
 
-        {/* Right Action Controls: Language Toggle, Mode Toggle, Reset & CRM Sync */}
+        {/* Right Action Controls: Language Toggle, Mode Toggle, Voice Speed, Test Audio, Reset */}
         <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
           {/* Multilingual Selector: English, Hindi, Kannada */}
           <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
@@ -753,13 +807,25 @@ export default function SimulatorPage() {
             </button>
           </div>
 
-          {/* Voice Mode Selector: Dictate & Edit (ChatGPT Style) vs Live Phone Call */}
+          {/* Voice Mode Selector: Live Voice Call vs Dictate */}
           <div className="flex items-center rounded-xl sm:rounded-2xl bg-slate-100/90 p-0.5 sm:p-1 border border-slate-200/80 shadow-inner text-[11px] sm:text-xs">
+            <button
+              onClick={() => setVoiceModeType("live_call")}
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                voiceModeType === "live_call"
+                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xs scale-[1.02]"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+              title="Hands-free continuous phone call simulation"
+            >
+              <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
+              <span>Voice-First Call</span>
+            </button>
             <button
               onClick={() => setVoiceModeType("dictate")}
               className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
                 voiceModeType === "dictate"
-                  ? "bg-indigo-600 text-white shadow-xs scale-[1.02]"
+                  ? "bg-white text-indigo-700 shadow-xs scale-[1.02]"
                   : "text-slate-600 hover:text-slate-900"
               }`}
               title="Speak -> Transcribe into text box -> Edit -> Send"
@@ -767,29 +833,41 @@ export default function SimulatorPage() {
               <Edit3 className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
               <span>Dictate & Edit</span>
             </button>
-            <button
-              onClick={() => setVoiceModeType("live_call")}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                voiceModeType === "live_call"
-                  ? "bg-indigo-600 text-white shadow-xs scale-[1.02]"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-              title="Hands-free continuous phone call simulation"
-            >
-              <PhoneCall className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
-              <span>Live Call</span>
-            </button>
           </div>
+
+          {/* Voice Speed Toggle */}
+          <button
+            onClick={() => setVoiceSpeed((prev) => (prev === 1.0 ? 1.15 : prev === 1.15 ? 1.3 : 1.0))}
+            className="px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-mono font-bold text-slate-700 shadow-2xs cursor-pointer transition-all"
+            title="Voice Playback Speed"
+          >
+            ⚡ {voiceSpeed}x
+          </button>
+
+          {/* Test Audio Button */}
+          <button
+            onClick={handleTestAudio}
+            disabled={isTestingAudio}
+            className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+              isTestingAudio
+                ? "bg-emerald-50 border-emerald-300 text-emerald-700 animate-pulse"
+                : "bg-white border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-600"
+            }`}
+            title="Test Voice Audio Output"
+          >
+            <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
+            <span>{isTestingAudio ? "Playing Audio..." : "Test Audio"}</span>
+          </button>
 
           {/* Audio TTS Output Toggle */}
           <button
             onClick={() => setAudioEnabled(!audioEnabled)}
             className={`p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border transition-all cursor-pointer ${
               audioEnabled
-                ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-2xs"
                 : "bg-slate-100 border-slate-200 text-slate-400"
             }`}
-            title="Toggle Assistant Speech Output (Sarvam Bulbul v3)"
+            title={audioEnabled ? "Mute Assistant Audio" : "Unmute Assistant Audio"}
           >
             {audioEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </button>
@@ -824,10 +902,10 @@ export default function SimulatorPage() {
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
             <span className="font-semibold">
-              Voice credits are exhausted. Text mode is still available with full Gemini AI reasoning & Google Calendar tools.
+              Voice credits exhausted. Native browser speech synthesis & text mode active with full Gemini reasoning.
             </span>
           </div>
-          <Badge variant="warning" className="text-[10px]">₹0 Protected</Badge>
+          <Badge variant="warning" className="text-[10px]">₹0 Safety Active</Badge>
         </div>
       )}
 
@@ -839,11 +917,70 @@ export default function SimulatorPage() {
       )}
 
       {/* =========================================================================
-          3-COLUMN RESPONSIVE COCKPIT GRID (Optimized for Laptop & Mobile 100% Zoom)
+          VOICE-FIRST CALL BANNER / TELEPHONY CONTROLS
+      ========================================================================== */}
+      <div className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 border border-indigo-900/50">
+        <div className="flex items-center gap-3.5 sm:gap-4 w-full md:w-auto">
+          <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/30 shrink-0">
+            <PhoneCall className={`h-6 w-6 ${isLiveCallActive ? "animate-bounce" : ""}`} />
+            {isLiveCallActive && (
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-slate-900" />
+              </span>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-black tracking-tight">
+                {isLiveCallActive ? "Live Voice AI Call Connected" : "Autonomous Voice AI Agent"}
+              </h2>
+              <Badge
+                variant={isLiveCallActive ? "neon-emerald" : "secondary"}
+                dot={isLiveCallActive}
+                className="text-[10px]"
+              >
+                {isLiveCallActive ? "Call in Progress" : "Ready to Call"}
+              </Badge>
+            </div>
+            <p className="text-xs text-indigo-200/80 mt-0.5">
+              {isLiveCallActive
+                ? "Agent speaks responses automatically • Hands-free turn-taking active"
+                : `Click 'Start Live Voice Call' to speak directly with the AI in ${selectedLanguage === "kn" ? "Kannada" : selectedLanguage === "hi" ? "Hindi" : "English"}.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto justify-end">
+          {!isLiveCallActive ? (
+            <button
+              onClick={handleStartVoiceCall}
+              className="w-full md:w-auto px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+            >
+              <PhoneCall className="h-4 w-4" />
+              <span>Start Live Voice Call</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <button
+                onClick={handleEndVoiceCall}
+                className="px-4 py-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+              >
+                <PhoneOff className="h-4 w-4" />
+                <span>End Call</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          3-COLUMN RESPONSIVE COCKPIT GRID
       ========================================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-start">
         {/* =========================================================================
-            COLUMN 1: BUSINESS CONTEXT, PROGRESS & TEST SCENARIOS (3 Cols on XL, 4 on LG)
+            COLUMN 1: BUSINESS CONTEXT, PROGRESS & TEST SCENARIOS
         ========================================================================== */}
         <div className="lg:col-span-4 xl:col-span-3 space-y-3.5 sm:space-y-4">
           {/* Active Business Profile Card */}
@@ -872,9 +1009,9 @@ export default function SimulatorPage() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Voice Mode:</span>
-                <span className="font-bold text-slate-800 text-[11px] truncate max-w-[130px]">
-                  {voiceModeType === "dictate" ? "ChatGPT Dictate & Edit" : "Continuous Live Call"}
+                <span className="text-slate-500">Voice Synthesis:</span>
+                <span className="font-bold text-emerald-700 text-[11px]">
+                  Bulbul v3 ({voiceSpeaker})
                 </span>
               </div>
               <div className="text-[11px] text-slate-600 bg-slate-50/80 p-2 sm:p-2.5 rounded-xl sm:rounded-2xl border border-slate-200/70 leading-relaxed font-normal">
@@ -890,7 +1027,7 @@ export default function SimulatorPage() {
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">
                   Fields Checklist
                 </span>
-                <p className="text-[10px] text-slate-400">Never asks answered questions</p>
+                <p className="text-[10px] text-slate-400">Contextual slot extraction</p>
               </div>
               <div className="text-right">
                 <span className="text-xs font-black text-indigo-600">
@@ -982,10 +1119,10 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 2: LIVE VOICE STREAM & CHATGPT-STYLE INPUT (6 Cols on XL, 8 on LG)
+            COLUMN 2: LIVE VOICE STREAM & PER-MESSAGE VOICE REPLAY
         ========================================================================== */}
         <div className="lg:col-span-8 xl:col-span-6 space-y-3.5 sm:space-y-4">
-          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl flex flex-col h-[520px] sm:h-[580px] lg:h-[620px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
+          <div className="glass-card-luxury rounded-2xl sm:rounded-3xl flex flex-col h-[540px] sm:h-[600px] lg:h-[640px] overflow-hidden border border-slate-200 shadow-xl bg-white/95">
             {/* High-End Voice Call Header */}
             <div className="p-3 sm:p-4 border-b border-slate-100/90 flex items-center justify-between bg-gradient-to-r from-slate-50/90 via-indigo-50/30 to-purple-50/30">
               <div className="flex items-center gap-2.5 sm:gap-3">
@@ -1006,7 +1143,7 @@ export default function SimulatorPage() {
                 <div>
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <h3 className="text-xs sm:text-sm font-extrabold text-slate-900 truncate max-w-[160px] sm:max-w-none">
-                      Live Missed-Call Voice Assistant
+                      CallPilot Voice Engine
                     </h3>
                     <Badge
                       variant={
@@ -1018,20 +1155,24 @@ export default function SimulatorPage() {
                           ? "neon-rose"
                           : isTranscribing
                           ? "neon-amber"
-                          : "neon-indigo"
+                          : isLiveCallActive
+                          ? "neon-indigo"
+                          : "secondary"
                       }
-                      dot={!isCallEnded}
+                      dot={isLiveCallActive && !isCallEnded}
                       className="text-[9px] sm:text-[10px] py-0.5 px-1.5"
                     >
                       {isCallEnded
                         ? "✓ Ended"
                         : voiceState === "speaking"
-                        ? "🔊 Speaking"
+                        ? "🔊 Agent Speaking"
                         : isRecording
-                        ? "🎙️ Recording"
+                        ? "🎙️ Caller Speaking"
                         : isTranscribing
                         ? "⚡ Transcribing"
-                        : "Active"}
+                        : isLiveCallActive
+                        ? "Live Call Active"
+                        : "Ready"}
                     </Badge>
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1 sm:gap-1.5 mt-0.5">
@@ -1064,7 +1205,7 @@ export default function SimulatorPage() {
                     <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-5" : liveVolume > 15 ? "h-4 sm:h-6" : "h-2"}`} />
                     <div className={`w-1 bg-indigo-600 rounded-full transition-all duration-75 ${voiceState === "speaking" ? "animate-wave-6" : liveVolume > 5 ? "h-2.5 sm:h-3" : "h-1.5"}`} />
                     <span className="ml-1 text-[9px] sm:text-[10px] font-extrabold text-indigo-700 tracking-wide uppercase hidden sm:inline">
-                      {voiceState === "speaking" ? "Speaking" : isRecording ? "Listening" : "Voice"}
+                      {voiceState === "speaking" ? "Speaking" : isRecording ? "Listening" : "Voice Active"}
                     </span>
                   </div>
                 )}
@@ -1078,6 +1219,8 @@ export default function SimulatorPage() {
             >
               {messages.map((msg) => {
                 const isAssistant = msg.role === "assistant";
+                const isCurrentlyPlaying = playingMessageId === msg.id || (voiceState === "speaking" && messages[messages.length - 1]?.id === msg.id && !playingMessageId);
+
                 return (
                   <div
                     key={msg.id}
@@ -1098,14 +1241,43 @@ export default function SimulatorPage() {
                       <span>{formatTime(msg.timestamp)}</span>
                     </div>
 
-                    <div
-                      className={`max-w-[90%] sm:max-w-[82%] rounded-2xl sm:rounded-3xl px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-sm transition-all ${
-                        isAssistant
-                          ? "bg-white border border-indigo-100/90 text-slate-800 font-normal rounded-tl-sm"
-                          : "bg-gradient-to-r from-indigo-600 via-indigo-600 to-purple-600 text-white font-medium rounded-tr-sm shadow-indigo-600/20"
-                      }`}
-                    >
-                      {msg.content}
+                    <div className="relative group max-w-[90%] sm:max-w-[85%]">
+                      <div
+                        className={`rounded-2xl sm:rounded-3xl px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-sm transition-all ${
+                          isAssistant
+                            ? "bg-white border border-indigo-100/90 text-slate-800 font-normal rounded-tl-sm"
+                            : "bg-gradient-to-r from-indigo-600 via-indigo-600 to-purple-600 text-white font-medium rounded-tr-sm shadow-indigo-600/20"
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+
+                      {/* Assistant Per-Message Voice Replay Button */}
+                      {isAssistant && (
+                        <div className="mt-1 flex items-center gap-2 pl-1">
+                          <button
+                            onClick={() => handleReplayMessage(msg)}
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                              isCurrentlyPlaying
+                                ? "bg-indigo-600 text-white shadow-xs animate-pulse"
+                                : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70"
+                            }`}
+                            title="Listen to agent audio response"
+                          >
+                            {isCurrentlyPlaying ? (
+                              <>
+                                <Square className="h-2.5 w-2.5 fill-current" />
+                                <span>Playing Audio...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="h-3 w-3" />
+                                <span>Listen Audio</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Tool Call Inline Badge if assistant executed tools */}
@@ -1142,7 +1314,7 @@ export default function SimulatorPage() {
                       <div className="h-2 w-2 rounded-full bg-purple-600 animate-bounce [animation-delay:0.2s]" />
                       <div className="h-2 w-2 rounded-full bg-pink-500 animate-bounce [animation-delay:0.4s]" />
                       <span className="text-xs font-semibold text-slate-600 ml-1">
-                        Checking availability & extracting entities...
+                        Synthesizing audio & executing tools...
                       </span>
                     </div>
                   </div>
@@ -1169,7 +1341,7 @@ export default function SimulatorPage() {
             </div>
 
             {/* =========================================================================
-                CHATGPT-STYLE VOICE DICTATION & EDIT BAR
+                VOICE INPUT & DICTATION BAR
             ========================================================================== */}
             <div className="p-2.5 sm:p-3.5 border-t border-slate-200/80 bg-white/90">
               {isRecording ? (
@@ -1215,7 +1387,7 @@ export default function SimulatorPage() {
                       type="button"
                       onClick={stopAndTranscribe}
                       className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-extrabold flex items-center gap-1 sm:gap-1.5 shadow-lg shadow-emerald-500/30 hover:scale-[1.02] transition-all cursor-pointer"
-                      title="Transcribe and edit message"
+                      title="Transcribe and process message"
                     >
                       <Check className="h-3.5 sm:h-4 w-3.5 sm:w-4" />
                       <span>Done</span>
@@ -1237,15 +1409,16 @@ export default function SimulatorPage() {
                   }}
                   className="flex items-center gap-2"
                 >
-                  {/* ChatGPT Microphone Dictation Trigger */}
+                  {/* Microphone Voice Trigger */}
                   <button
                     type="button"
                     onClick={startRecording}
                     disabled={isLoading || voiceState === "speaking"}
-                    className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-slate-100 hover:bg-indigo-50 border border-slate-300/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 transition-all cursor-pointer shrink-0 shadow-2xs group"
-                    title="Click to speak (ChatGPT Voice Dictation)"
+                    className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-400 text-indigo-700 transition-all cursor-pointer shrink-0 shadow-2xs group flex items-center gap-1.5 font-bold text-xs"
+                    title="Click to speak (Voice Input)"
                   >
                     <Mic className="h-4 w-4 text-indigo-600 group-hover:scale-110 transition-transform" />
+                    <span className="hidden sm:inline">Speak</span>
                   </button>
 
                   <div className="relative flex-1">
@@ -1254,10 +1427,10 @@ export default function SimulatorPage() {
                       type="text"
                       placeholder={
                         selectedLanguage === "kn"
-                          ? "ಕರೆ ಮಾಡುವವರು ಏನು ಹೇಳುತ್ತಾರೆಂದು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ ಮೈಕ್ ಕ್ಲಿಕ್ ಮಾಡಿ..."
+                          ? "ಕರೆ ಮಾಡುವವರು ಏನು ಹೇಳುತ್ತಾರೆಂದು ಟೈಪ್ ಮಾಡಿ ಅಥವಾ 'Speak' ಕ್ಲಿಕ್ ಮಾಡಿ..."
                           : selectedLanguage === "hi"
-                          ? "कॉल करने वाले की बात लिखें या माइक से बोलें..."
-                          : "Type or click Mic to speak (e.g. 'Anusha', 'September 4 12:34 AM')..."
+                          ? "कॉल करने वाले की बात लिखें या 'Speak' पर क्लिक करें..."
+                          : "Type or click Speak (e.g. 'Priya', 'Tomorrow at 3 PM')..."
                       }
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
@@ -1285,7 +1458,7 @@ export default function SimulatorPage() {
         </div>
 
         {/* =========================================================================
-            COLUMN 3: LIVE TRIAGE, STRUCTURED ENTITIES & TOOL CONSOLE (3 Cols on XL, 12 on LG)
+            COLUMN 3: LIVE TRIAGE, STRUCTURED ENTITIES & TOOL CONSOLE
         ========================================================================== */}
         <div className="lg:col-span-12 xl:col-span-3">
           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3.5 sm:gap-4">

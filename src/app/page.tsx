@@ -21,39 +21,85 @@ import {
   TrendingUp,
   BookOpen,
   Play,
+  Volume2,
+  Square,
 } from "lucide-react";
 import { Button, Badge, Card, CardContent } from "@/components/ui";
 import { WorkflowGuideModal } from "@/components/layout/WorkflowGuideModal";
+import { voiceEngine } from "@/lib/voice/voiceEngine";
 
 export default function LandingPage() {
   const [activeTab, setActiveTab] = useState<"cake_shop" | "clinic" | "delivery">("cake_shop");
   const [showWorkflowGuide, setShowWorkflowGuide] = useState(false);
+  const [activePlayingSample, setActivePlayingSample] = useState<string | null>(null);
+
+  const voiceSamples = [
+    {
+      id: "en_clinic",
+      label: "🇬🇧 English Doctor Intake",
+      lang: "en",
+      text: "Hello! Thank you for calling Metro Health Clinic. I can help you schedule an appointment with Dr. Sharma. What day works best for you?",
+      tag: "Clinic Intake",
+    },
+    {
+      id: "hi_cake",
+      label: "🇮🇳 Hindi Cake Order",
+      lang: "hi",
+      text: "नमस्ते! स्वीट डिलाइट्स बेकरी में आपका स्वागत है। क्या आप आज शाम के लिए 2 किलो का चॉकलेट केक आर्डर करना चाहते हैं?",
+      tag: "Hindi Voice",
+    },
+    {
+      id: "kn_clinic",
+      label: "🇮🇳 Kannada Doctor Booking",
+      lang: "kn",
+      text: "ನಮಸ್ಕಾರ! ಮೆಟ್ರೋ ಹೆಲ್ತ್ ಕ್ಲಿನಿಕ್‌ಗೆ ಸ್ವಾಗತ. ಡಾಕ್ಟರ್ ಶರ್ಮಾ ಅವರ ಅಪಾಯಿಂಟ್‌ಮೆಂಟ್‌ಗಾಗಿ ನಿಮ್ಮ ಹೆಸರು ಮತ್ತು ಸಮಯ ತಿಳಿಸಿ.",
+      tag: "Kannada Voice",
+    },
+  ];
+
+  const handlePlayVoiceSample = async (sample: typeof voiceSamples[0]) => {
+    if (activePlayingSample === sample.id) {
+      voiceEngine.stopSpeaking();
+      setActivePlayingSample(null);
+      return;
+    }
+
+    setActivePlayingSample(sample.id);
+    await voiceEngine.speak({
+      text: sample.text,
+      language: sample.lang as any,
+      speaker: "shubh",
+      onStart: () => setActivePlayingSample(sample.id),
+      onEnd: () => setActivePlayingSample(null),
+      onError: () => setActivePlayingSample(null),
+    });
+  };
 
   return (
     <div className="flex flex-col min-h-screen">
       {/* 1. HERO SECTION */}
-      <section className="relative pt-16 pb-24 md:pt-24 md:pb-32 overflow-hidden bg-gradient-to-b from-indigo-50/60 via-white to-slate-50">
+      <section className="relative pt-16 pb-20 md:pt-24 md:pb-28 overflow-hidden bg-gradient-to-b from-indigo-50/60 via-white to-slate-50">
         {/* Subtle background glow */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-tr from-indigo-400/15 via-purple-300/15 to-pink-300/10 blur-[130px] rounded-full pointer-events-none" />
 
         <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
           <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 border border-indigo-200/80 px-4 py-1.5 text-xs font-bold text-indigo-700 mb-6 shadow-2xs">
             <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-            <span>Autonomous Missed-Call Voice AI & Google Calendar Agent</span>
+            <span>Voice-First Autonomous AI Assistant & Google Calendar Agent</span>
           </div>
 
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-900 max-w-4xl mx-auto leading-[1.15] mb-6">
             Never lose a customer to a <span className="gradient-text-vibrant">missed call.</span>
           </h1>
 
-          <p className="text-base sm:text-xl text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed font-normal">
-            CallPilot AI immediately engages missed callers in natural English or Hindi, extracts required order details, checks real-time availability, and books appointments autonomously on Google Calendar.
+          <p className="text-base sm:text-xl text-slate-600 max-w-2xl mx-auto mb-8 leading-relaxed font-normal">
+            CallPilot AI immediately engages missed callers with natural Indian English, Hindi, and Kannada vocalization, extracts order details, and books appointments autonomously on Google Calendar.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-lg mx-auto">
             <Link href="/simulator" className="w-full sm:w-auto">
-              <Button size="lg" variant="glow" className="w-full text-base font-bold shadow-md" rightIcon={<ArrowRight className="h-4 w-4" />}>
-                Try Live Simulator
+              <Button size="lg" variant="glow" className="w-full text-base font-bold shadow-md" leftIcon={<PhoneCall className="h-4 w-4" />} rightIcon={<ArrowRight className="h-4 w-4" />}>
+                Start Live Voice Call Simulator
               </Button>
             </Link>
             <button
@@ -65,6 +111,40 @@ export default function LandingPage() {
             </button>
           </div>
 
+          {/* Instant Audio Samples Preview */}
+          <div className="mt-10 max-w-3xl mx-auto">
+            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-center gap-1.5">
+              <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
+              <span>Click to Preview Real Agent Voice Audio</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
+              {voiceSamples.map((sample) => {
+                const isPlaying = activePlayingSample === sample.id;
+                return (
+                  <button
+                    key={sample.id}
+                    onClick={() => handlePlayVoiceSample(sample)}
+                    className={`p-3.5 rounded-2xl border text-xs text-left transition-all cursor-pointer shadow-xs ${
+                      isPlaying
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-md scale-[1.02]"
+                        : "bg-white/90 hover:bg-white border-slate-200/90 hover:border-indigo-300 text-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-xs">{sample.label}</span>
+                      <div className={`h-6 w-6 rounded-full flex items-center justify-center ${isPlaying ? "bg-white text-indigo-600" : "bg-indigo-50 text-indigo-600"}`}>
+                        {isPlaying ? <Square className="h-2.5 w-2.5 fill-current" /> : <Play className="h-3 w-3 fill-current ml-0.5" />}
+                      </div>
+                    </div>
+                    <div className={`text-[11px] line-clamp-2 italic ${isPlaying ? "text-indigo-100" : "text-slate-500"}`}>
+                      &ldquo;{sample.text}&rdquo;
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Social Proof Badges */}
           <div className="mt-10 flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs font-semibold text-slate-600">
             <div className="flex items-center gap-2">
@@ -73,16 +153,16 @@ export default function LandingPage() {
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              <span>English, Hindi & Hinglish Voice</span>
+              <span>English, Hindi & Kannada Voice</span>
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              <span>Zero-Config Instant Sandbox</span>
+              <span>₹0 Out-of-Pocket Setup</span>
             </div>
           </div>
 
           {/* Animated Product Cockpit Preview */}
-          <div className="mt-14 relative mx-auto max-w-5xl rounded-3xl border border-slate-200/90 bg-white p-3 shadow-xl backdrop-blur-xl">
+          <div className="mt-12 relative mx-auto max-w-5xl rounded-3xl border border-slate-200/90 bg-white p-3 shadow-xl backdrop-blur-xl">
             <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 sm:p-6 overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
                 <div className="flex items-center gap-2">
@@ -91,7 +171,7 @@ export default function LandingPage() {
                   <div className="h-3 w-3 rounded-full bg-emerald-400" />
                   <span className="ml-2 text-xs font-bold text-slate-600">CallPilot AI Simulator • Active Missed-Call Session</span>
                 </div>
-                <Badge variant="success" dot>Live AI Reasoning</Badge>
+                <Badge variant="success" dot>Live AI Reasoning & Audio</Badge>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
@@ -116,7 +196,7 @@ export default function LandingPage() {
                     &ldquo;Hi, I need a 2kg chocolate cake for tomorrow pickup.&rdquo;
                   </div>
                   <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-2 text-xs text-indigo-900">
-                    <span className="text-purple-700 font-bold">CallPilot AI: </span>
+                    <span className="text-purple-700 font-bold">CallPilot AI (🔊 Audio): </span>
                     &ldquo;Understood! Flagged as urgent for tomorrow. What message would you like written on top?&rdquo;
                   </div>
                 </div>
@@ -164,8 +244,8 @@ export default function LandingPage() {
               {
                 step: "02",
                 icon: Bot,
-                title: "AI Natural Intake",
-                description: "AI engages the caller warmly in English or Hindi, collecting required fields without sounding like a robotic form.",
+                title: "AI Natural Voice Intake",
+                description: "AI speaks warmly in English, Hindi, or Kannada, collecting required fields with zero robotic menus.",
               },
               {
                 step: "03",
@@ -246,7 +326,7 @@ export default function LandingPage() {
                       <span><strong>Follow-up Action:</strong> Creates Bakery Quote task + Alerts head chef.</span>
                     </div>
                   </div>
-                  <Link href="/simulator?industry=cake_shop">
+                  <Link href="/simulator">
                     <Button size="sm" variant="glow" rightIcon={<ArrowRight className="h-3.5 w-3.5" />}>
                       Simulate Cake Shop Flow
                     </Button>
@@ -287,7 +367,7 @@ export default function LandingPage() {
                       <span><strong>Guardrail:</strong> Strict safety filter prohibiting medical diagnosis.</span>
                     </div>
                   </div>
-                  <Link href="/simulator?industry=clinic">
+                  <Link href="/simulator">
                     <Button size="sm" variant="glow" rightIcon={<ArrowRight className="h-3.5 w-3.5" />}>
                       Simulate Clinic Booking
                     </Button>
@@ -327,7 +407,7 @@ export default function LandingPage() {
                       <span><strong>Urgency Rule:</strong> Fragile or delayed parcels flagged for immediate manager review.</span>
                     </div>
                   </div>
-                  <Link href="/simulator?industry=delivery">
+                  <Link href="/simulator">
                     <Button size="sm" variant="glow" rightIcon={<ArrowRight className="h-3.5 w-3.5" />}>
                       Simulate Delivery Tracking
                     </Button>
@@ -362,7 +442,7 @@ export default function LandingPage() {
             Stop losing leads to unanswered phone calls.
           </h3>
           <p className="text-indigo-100 text-sm sm:text-base max-w-xl mx-auto">
-            Experience CallPilot AI in the interactive simulator or configure a customized workflow for your business.
+            Experience CallPilot AI in the interactive voice simulator or configure a customized workflow for your business.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
             <Link href="/simulator">

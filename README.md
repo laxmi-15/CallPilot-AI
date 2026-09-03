@@ -97,13 +97,25 @@ Browser Audio Player + Dynamic Soundwave Equalizer
 
 ---
 
-## 🧪 Testing Checklist
-
+- [x] **Voice-First Calling Cockpit**: Hands-free telephony session with realistic ring, connect chime, and hangup tones.
+- [x] **Dual-Engine Audio Synthesis**: Primary Sarvam Bulbul v3 Indian TTS (`shubh`/`meera`) with automatic browser SpeechSynthesis fallback guaranteeing audio in all environments.
+- [x] **Web Audio Autoplay Unlock**: Automatic browser gesture unlocking ensuring audio never gets blocked.
+- [x] **Per-Message Voice Replay**: Dedicated 🔊 Listen / Replay buttons on every assistant message.
 - [x] **Real Microphone Capture**: Web Audio volume visualizer and silence chunk processing.
 - [x] **Sarvam Saaras v3 STT**: Transcribes English, Hindi, and Kannada speech.
 - [x] **Multilingual Entity Extraction**: Contextual slot-filling without repeating questions.
 - [x] **Google Calendar Overlap Gate**: Unavailable slots return `available: false` and suggest alternatives without creating events.
-- [x] **Sarvam Bulbul v3 TTS**: Speaks localized responses in English, Hindi, and Kannada.
 - [x] **Audio Feedback Suppression**: Microphone is paused while CallPilot is speaking, with an Interrupt button.
 - [x] **Interchangeable Voice + Text**: Users can type and speak across the same conversation.
 - [x] **₹0 Safety Guard**: Catches HTTP 402, displays warning, and falls back to text mode cleanly.
+
+---
+
+## 📹 Video Walkthrough & Presentation Guide
+
+A complete voice & architectural walkthrough is available showcasing:
+1. **Missed-Call Autonomous Voice AI Workflow**
+2. **Dual-Engine Multilingual Voice Synthesis (English, Hindi, Kannada)**
+3. **Google Calendar API v3 Tool Calling & Availability Conflict Resolution**
+4. **CRM Lead & Task Synchronization**
+

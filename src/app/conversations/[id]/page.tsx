@@ -18,9 +18,12 @@ import {
   Check,
   Layers,
   FileText,
+  Volume2,
+  Square,
+  Play,
 } from "lucide-react";
 import { storageRepo, AppState } from "@/lib/store/storage";
-import { Conversation, ConversationStatus, UrgencyLevel } from "@/types";
+import { Conversation, ConversationStatus, UrgencyLevel, Message } from "@/types";
 import { Button, Badge, Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
 import {
   formatDateTime,
@@ -29,16 +32,21 @@ import {
   getStatusBadgeClasses,
   formatPhone,
 } from "@/lib/utils";
+import { voiceEngine, VoiceLanguage } from "@/lib/voice/voiceEngine";
 
 export default function ConversationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const router = useRouter();
   const [appState, setAppState] = useState<AppState>(storageRepo.getState());
   const [taskCreated, setTaskCreated] = useState(false);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = storageRepo.subscribe((s) => setAppState({ ...s }));
-    return () => unsub();
+    return () => {
+      unsub();
+      voiceEngine.stopSpeaking();
+    };
   }, []);
 
   const conversation = storageRepo.getConversation(resolvedParams.id);
@@ -76,6 +84,24 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
     });
     setTaskCreated(true);
     setTimeout(() => setTaskCreated(false), 3000);
+  };
+
+  const handlePlayMessageAudio = async (msg: Message) => {
+    if (playingMessageId === msg.id) {
+      voiceEngine.stopSpeaking();
+      setPlayingMessageId(null);
+      return;
+    }
+
+    setPlayingMessageId(msg.id);
+    await voiceEngine.speak({
+      text: msg.content,
+      language: (conversation.language || "en") as VoiceLanguage,
+      speaker: "shubh",
+      onStart: () => setPlayingMessageId(msg.id),
+      onEnd: () => setPlayingMessageId(null),
+      onError: () => setPlayingMessageId(null),
+    });
   };
 
   return (
@@ -141,8 +167,8 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
                 <span className="font-semibold">{formatDateTime(conversation.createdAt)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Detected Language:</span>
-                <span className="font-semibold uppercase">{conversation.language || "en"}</span>
+                <span className="text-slate-500">Language:</span>
+                <span className="font-bold text-indigo-700 uppercase">{conversation.language || "en"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Session ID:</span>
@@ -162,7 +188,7 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
           <Card className="p-5 border-slate-200 bg-white shadow-xs space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Extracted Customer Data</span>
-              <Badge variant="purple" className="text-[10px]">Data-Driven</Badge>
+              <Badge variant="purple" className="text-[10px]">Structured</Badge>
             </div>
 
             {Object.keys(conversation.extractedFields || {}).length === 0 ? (
@@ -210,13 +236,13 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
           )}
         </div>
 
-        {/* Right Column: Full Conversation Transcript (7 cols) */}
+        {/* Right Column: Full Conversation Transcript with Voice Audio Replay */}
         <div className="lg:col-span-7 space-y-4">
           <Card className="border-slate-200 bg-white shadow-xs p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-indigo-600" />
-                <span>Audio Transcript & Conversation Turns</span>
+                <span>Audio Transcript & Voice Log</span>
               </h3>
               <span className="text-xs text-slate-500 font-medium">
                 {conversation.messages.length} Messages
@@ -226,6 +252,7 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
             <div className="space-y-4 pt-2">
               {conversation.messages.map((msg) => {
                 const isAssistant = msg.role === "assistant";
+                const isPlaying = playingMessageId === msg.id;
 
                 return (
                   <div
@@ -248,6 +275,32 @@ export default function ConversationDetailPage({ params }: { params: Promise<{ i
                     >
                       {msg.content}
                     </div>
+
+                    {/* Voice Replay button for assistant response */}
+                    {isAssistant && (
+                      <div className="mt-1 flex items-center gap-1.5 pl-1">
+                        <button
+                          onClick={() => handlePlayMessageAudio(msg)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                            isPlaying
+                              ? "bg-indigo-600 text-white animate-pulse"
+                              : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80"
+                          }`}
+                        >
+                          {isPlaying ? (
+                            <>
+                              <Square className="h-2.5 w-2.5 fill-current" />
+                              <span>Playing Voice...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="h-3 w-3" />
+                              <span>Replay Voice</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
 
                     {isAssistant && msg.toolCalls && msg.toolCalls.length > 0 && (
                       <div className="mt-1 flex gap-1 pl-1">
