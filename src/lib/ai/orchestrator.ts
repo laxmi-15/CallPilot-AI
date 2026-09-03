@@ -376,7 +376,10 @@ export function extractFieldsFromText(
       if (isNegative) {
         extracted.budget = "Flexible";
       } else {
-        const budgetMatch = text.match(/(?:rs\.?|inr|₹|\$)\s*(\d+)/i) || text.match(/(\d+)\s*(?:rupees|bucks|dollars|ರೂಪಾಯಿ)/i);
+        const budgetMatch =
+          text.match(/(?:rs\.?|inr|₹|\$)\s*(\d+)/i) ||
+          text.match(/(\d+)\s*(?:rupees|bucks|dollars|ರೂಪಾಯಿ)/i) ||
+          text.match(/(?:budget\s*(?:is|of|around)?\s*[:=]?\s*)(\d+)/i);
         if (budgetMatch) {
           extracted.budget = `₹${budgetMatch[1]}`;
         } else if (text.trim().length > 0) {
@@ -535,6 +538,16 @@ export function extractFieldsFromText(
     const trackMatch = text.match(/\b(DEL-\d{4}|TRK-\d{6}|[A-Z0-9]{8,12})\b/i);
     if (trackMatch) {
       extracted.tracking_number = trackMatch[0].toUpperCase();
+    }
+  }
+
+  if (workflow.fields.some((f) => f.name === "budget") && !extracted.budget) {
+    const budgetMatch =
+      text.match(/(?:rs\.?|inr|₹|\$)\s*(\d+)/i) ||
+      text.match(/(\d+)\s*(?:rupees|bucks|dollars|ರೂಪಾಯಿ)/i) ||
+      text.match(/(?:budget\s*(?:is|of|around)?\s*[:=]?\s*)(\d+)/i);
+    if (budgetMatch) {
+      extracted.budget = `₹${budgetMatch[1]}`;
     }
   }
 

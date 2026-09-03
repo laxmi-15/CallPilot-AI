@@ -83,7 +83,7 @@ async function runTests() {
     // Test checkAvailability
     const availResult = await toolRegistry.executeTool("calendar.checkAvailability", {
       date: "Tomorrow",
-      time: "3:00 PM",
+      time: "11:00 AM",
     }, { businessId: "biz_metro_health" });
     assert(availResult.success === true, "calendar.checkAvailability executes successfully");
     assert(availResult.data?.available === true, "Reports slot is available");

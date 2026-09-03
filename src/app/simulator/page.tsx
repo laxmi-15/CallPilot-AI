@@ -69,7 +69,7 @@ export default function SimulatorPage() {
   const [liveVolume, setLiveVolume] = useState<number>(0);
   const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const recTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -157,7 +157,12 @@ export default function SimulatorPage() {
   }, [selectedIndustry, selectedLanguage]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [messages, isLoading, isTranscribing]);
 
   const formatCallDuration = (seconds: number) => {
@@ -1067,7 +1072,10 @@ export default function SimulatorPage() {
             </div>
 
             {/* Conversation Stream Message List */}
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-3 sm:space-y-4 bg-slate-50/40 min-h-0">
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-3 sm:space-y-4 bg-slate-50/40 min-h-0"
+            >
               {messages.map((msg) => {
                 const isAssistant = msg.role === "assistant";
                 return (
@@ -1140,7 +1148,6 @@ export default function SimulatorPage() {
                   </div>
                 </div>
               )}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Smart Contextual Suggestion Chips */}
